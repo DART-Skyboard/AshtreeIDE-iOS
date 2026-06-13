@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background: deep ash white -->
+  <rect width="1024" height="1024" rx="224" fill="#FAFAFA"/>
+
+  <!-- Outer compiler frame (red posts — from LEATR hardware doc) -->
+  <rect x="96" y="60" width="832" height="904" rx="48" fill="none" stroke="#CC2810" stroke-width="28"/>
+
+  <!-- Left red post -->
+  <rect x="96" y="60" width="28" height="904" rx="14" fill="#CC2810"/>
+  <!-- Right red post -->
+  <rect x="900" y="60" width="28" height="904" rx="14" fill="#CC2810"/>
+  <!-- Top beam (closes the equation) -->
+  <rect x="96" y="60" width="832" height="28" rx="14" fill="#CC2810"/>
+
+  <!-- Inner cyan walls — peripheral form / double-tag receptor -->
+  <rect x="168" y="132" width="688" height="760" rx="24" fill="none" stroke="#00E5FF" stroke-width="14" opacity="0.7"/>
+
+  <!-- Trunk — S-curve upward (Arc Edge 1/8-circle geometry) -->
+  <path d="M512 860 C492 800 532 740 512 680 C492 620 532 580 512 530" fill="none" stroke="#18301F" stroke-width="40" stroke-linecap="round"/>
+
+  <!-- Roots -->
+  <path d="M512 860 C484 880 440 900 400 920" fill="none" stroke="#18301F" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
+  <path d="M512 860 C540 880 580 900 620 920" fill="none" stroke="#18301F" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
+  <path d="M512 860 C500 890 488 910 476 930" fill="none" stroke="#18301F" stroke-width="14" stroke-linecap="round" opacity="0.35"/>
+  <path d="M512 860 C524 890 536 910 548 930" fill="none" stroke="#18301F" stroke-width="14" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Level 2 branches (Arc Edge recursive fan, 1/8-circle arcs) -->
+  <!-- Left main -->
+  <path d="M512 530 C492 510 420 490 330 440" fill="none" stroke="#18301F" stroke-width="26" stroke-linecap="round"/>
+  <!-- Right main -->
+  <path d="M512 530 C532 510 604 490 694 440" fill="none" stroke="#18301F" stroke-width="26" stroke-linecap="round"/>
+  <!-- Center top -->
+  <path d="M512 530 C512 510 512 460 512 380" fill="none" stroke="#18301F" stroke-width="26" stroke-linecap="round"/>
+
+  <!-- Level 3 branches -->
+  <!-- Far left -->
+  <path d="M330 440 C300 420 250 390 200 340" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+  <!-- Mid left -->
+  <path d="M330 440 C320 410 310 370 320 310" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+  <!-- Far right -->
+  <path d="M694 440 C724 420 774 390 824 340" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+  <!-- Mid right -->
+  <path d="M694 440 C704 410 714 370 704 310" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+  <!-- Center left -->
+  <path d="M512 380 C490 360 450 320 420 260" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+  <!-- Center right -->
+  <path d="M512 380 C534 360 574 320 604 260" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+  <!-- Center top fine -->
+  <path d="M512 380 C512 350 512 310 512 250" fill="none" stroke="#18301F" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Level 4 fine twigs -->
+  <path d="M200 340 C185 315 172 290 168 255" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M200 340 C215 315 228 295 236 265" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M824 340 C839 315 852 290 856 255" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M824 340 C809 315 796 295 788 265" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M420 260 C404 240 395 215 390 185" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M604 260 C620 240 629 215 634 185" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M512 250 C504 225 502 200 504 168" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M512 250 C520 225 522 200 520 168" fill="none" stroke="#18301F" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- Leaf clusters at branch tips (filled ellipses) -->
+  <ellipse cx="168" cy="250" rx="22" ry="16" fill="#18301F"/>
+  <ellipse cx="236" cy="260" rx="18" ry="13" fill="#18301F"/>
+  <ellipse cx="320" cy="305" rx="18" ry="13" fill="#18301F"/>
+  <ellipse cx="420" cy="258" rx="18" ry="13" fill="#18301F"/>
+  <ellipse cx="390" cy="182" rx="16" ry="11" fill="#18301F"/>
+  <ellipse cx="504" cy="166" rx="16" ry="11" fill="#18301F"/>
+  <ellipse cx="520" cy="166" rx="16" ry="11" fill="#18301F"/>
+  <ellipse cx="604" cy="258" rx="18" ry="13" fill="#18301F"/>
+  <ellipse cx="634" cy="182" rx="16" ry="11" fill="#18301F"/>
+  <ellipse cx="704" cy="305" rx="18" ry="13" fill="#18301F"/>
+  <ellipse cx="788" cy="260" rx="18" ry="13" fill="#18301F"/>
+  <ellipse cx="856" cy="250" rx="22" ry="16" fill="#18301F"/>
+  <!-- Center top cluster -->
+  <ellipse cx="512" cy="248" rx="20" ry="14" fill="#18301F"/>
+
+  <!-- Small leaf accent dots — outer perimeter -->
+  <circle cx="200" cy="338" r="6" fill="#CC2810" opacity="0.6"/>
+  <circle cx="512" cy="378" r="6" fill="#00E5FF" opacity="0.7"/>
+  <circle cx="824" cy="338" r="6" fill="#CC2810" opacity="0.6"/>
+</svg>
