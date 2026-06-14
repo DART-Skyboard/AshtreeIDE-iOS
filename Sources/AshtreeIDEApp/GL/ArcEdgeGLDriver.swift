@@ -388,24 +388,24 @@ struct ArcEdgePanel: View {
                     Button(action:{withAnimation{show=false}}){Image(systemName:"chevron.left").font(.system(size:10)).foregroundColor(Color(hex:"#4a5568"))}
                 }.padding(10).background(Color(hex:"#161b22")).overlay(Divider().background(Color(hex:"#21262d")),alignment:.bottom)
                 VStack(alignment:.leading,spacing:8) {
-                    ArcToggle("Tangent System",val:$vm.tangentEnabled)
-                    ArcToggle("Join Meridians Σ",val:$vm.meridianJoin)
+                    ArcToggle(label:"Tangent System",val:$vm.tangentEnabled)
+                    ArcToggle(label:"Join Meridians Σ",val:$vm.meridianJoin)
                     Divider().background(Color(hex:"#21262d"))
                     ArcAxisCtrl(label:"X AXIS",color:Color(hex:"#ff3d5a"),inf:$vm.axisX.influence,phase:$vm.axisX.phase,vis:$vm.axisX.visible)
                     ArcAxisCtrl(label:"Y AXIS",color:Color(hex:"#39ff82"),inf:$vm.axisY.influence,phase:$vm.axisY.phase,vis:$vm.axisY.visible)
                     ArcAxisCtrl(label:"Z AXIS",color:Color(hex:"#00e5ff"),inf:$vm.axisZ.influence,phase:$vm.axisZ.phase,vis:$vm.axisZ.visible)
                     Divider().background(Color(hex:"#21262d"))
                     Text("ENVIRONMENT").font(.system(size:7,weight:.semibold,design:.monospaced)).foregroundColor(Color(hex:"#4a5568")).kerning(1.5)
-                    ArcSl("Gravity",val:$vm.physics.gravity,range:0...20,unit:"m/s²")
-                    ArcSl("Wind",val:$vm.physics.wind,range:0...200,unit:"mph")
-                    ArcSl("Temp",val:$vm.physics.temperature,range:0...120,unit:"°F")
-                    ArcSl("Humidity",val:$vm.physics.humidity,range:0...100,unit:"%")
-                    ArcSl("Pressure",val:$vm.physics.pressure,range:0...30,unit:"PSI")
+                    ArcSl(label:"Gravity",val:$vm.physics.gravity,range:0...20,unit:"m/s²")
+                    ArcSl(label:"Wind",val:$vm.physics.wind,range:0...200,unit:"mph")
+                    ArcSl(label:"Temp",val:$vm.physics.temperature,range:0...120,unit:"°F")
+                    ArcSl(label:"Humidity",val:$vm.physics.humidity,range:0...100,unit:"%")
+                    ArcSl(label:"Pressure",val:$vm.physics.pressure,range:0...30,unit:"PSI")
                     Divider().background(Color(hex:"#21262d"))
-                    ArcToggle("Grid Planes",val:$vm.grid.enabled)
+                    ArcToggle(label:"Grid Planes",val:$vm.grid.enabled)
                     if vm.grid.enabled {
-                        ArcSl("XZ count X",val:.init(get:{Double(vm.grid.xzCountX)},set:{vm.grid.xzCountX=Int($0.rounded())}),range:1...20,unit:"")
-                        ArcSl("XZ count Z",val:.init(get:{Double(vm.grid.xzCountZ)},set:{vm.grid.xzCountZ=Int($0.rounded())}),range:1...20,unit:"")
+                        ArcSl(label:"XZ count X",val:.init(get:{Double(vm.grid.xzCountX)},set:{vm.grid.xzCountX=Int($0.rounded())}),range:1...20,unit:"")
+                        ArcSl(label:"XZ count Z",val:.init(get:{Double(vm.grid.xzCountZ)},set:{vm.grid.xzCountZ=Int($0.rounded())}),range:1...20,unit:"")
                     }
                     Divider().background(Color(hex:"#21262d"))
                     Text("ARC EDGE MATH (doc=3.0)").font(.system(size:7,weight:.semibold,design:.monospaced)).foregroundColor(Color(hex:"#4a5568")).kerning(1.5)
@@ -437,8 +437,8 @@ struct ArcAxisCtrl: View {
                     .background(vis ? color.opacity(0.15) : Color.clear)
                     .cornerRadius(3)
             }
-            ArcSl("Influence", val: $inf, range: 0...1, unit: "")
-            ArcSl("Phase",     val: $phase, range: 0...6.28, unit: "rad")
+            ArcSl(label:"Influence", val: $inf, range: 0...1, unit: "")
+            ArcSl(label:"Phase", val: $phase, range: 0...6.28, unit: "rad")
         }
     }
 }
