@@ -496,7 +496,7 @@ struct TerminalRow: View {
             .foregroundColor(Color(hex: color))
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical: 0.5)
+            .padding(.vertical, 0.5)
     }
 }
 
@@ -618,14 +618,16 @@ struct IDEDocsView: View {
     thenplace var (s) with var (s)
   }
   irout ("Result: " placeto (s))
-}|';'|                 // Switch CLOSE""")
+}|';'|                 // Switch CLOSE
+                    """)
                 DocBlock(title: "TAG SYSTEM", body: """
 {{outer-tag}}  — Environment isolation shell (hardware frame)
 [[inner-tag]]  — Script ownership. Double-tagging prevents
                  cross-compilation between users.
 [poly:...]     — Polynomial/physics container. Math data
                  isolated from syntax runtime.
-[net:...]      — Network syntax. Logarithmic iterative form.""")
+[net:...]      — Network syntax. Logarithmic iterative form.
+                    """)
                 DocBlock(title: "ORDER OF OPERATIONS (19)", body: """
 Natural Tools (1-7):
 Maze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors
@@ -636,7 +638,8 @@ Addition · Subtraction · Logarithm · Trigonometry
 Temperature · Velocity · Pressure · Mass · Photosynthesis
 
 Senses (AI):
-Touch · Taste · Vision · Smell · Hear""")
+Touch · Taste · Vision · Smell · Hear
+                    """)
                 DocBlock(title: "BRPN — PENDULUM NODE", body: """
 After compile, shell routing via Buoyancy Reflex:
   f = formation  (1.0 if outer-tags present)
@@ -648,7 +651,8 @@ After compile, shell routing via Buoyancy Reflex:
 Shell:
   ≥ 0.76 → GEOLOGICAL
   ≥ 0.44 → MARITIME
-  < 0.44 → AEROSPACE""")
+  < 0.44 → AEROSPACE
+                    """)
                 DocBlock(title: "GL DRIVERS", body: """
 import (GLDrivers)  // Load 3D GL runtime
 
@@ -661,7 +665,8 @@ Arc Edge math (Justin Craig Venable):
   Area:          circ²
   Volume:        area³
   Sphere SA:     vol × 0.25
-  Branch:        1/8-circle arc along CatmullRom curve""")
+  Branch:        1/8-circle arc along CatmullRom curve
+                    """)
                 DocBlock(title: "KEYWORDS", body: "irin · irout · thenplace · place · placeto\nResearch · Report · with · var · when · where\nand · or · not · for · else · is · if · end\nimport · return")
             }
             .padding(16)
