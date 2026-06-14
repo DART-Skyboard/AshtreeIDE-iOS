@@ -178,11 +178,8 @@ struct IDEMaze3DView: View {
     var body: some View {
         ZStack {
             if let node = mazeVM.sceneNode {
-                IDEMazeSceneKitView(rootNode: node, resetCamera: { mazeVM.resetCamera?() })
-                    .onAppear {
-                        // Provide reset callback
-                        mazeVM.resetCamera = { /* handled in coordinator */ }
-                    }
+                IDEMazeSceneKitView(rootNode: node, resetTrigger: mazeVM.triggerReset)
+
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "cube.transparent")
@@ -221,7 +218,7 @@ struct IDEMaze3DView: View {
 
 struct IDEMazeSceneKitView: UIViewRepresentable {
     let rootNode: SCNNode
-    let resetCamera: () -> Void
+    let resetTrigger: Int
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -283,6 +280,11 @@ struct IDEMazeSceneKitView: UIViewRepresentable {
     }
 
     func updateUIView(_ v: SCNView, context: Context) {
+        // Trigger camera reset when resetTrigger changes
+        if context.coordinator.lastResetTrigger != resetTrigger {
+            context.coordinator.lastResetTrigger = resetTrigger
+            context.coordinator.resetView()
+        }
         // Remove old maze nodes, add new one
         v.scene?.rootNode.childNodes
             .filter { $0.light == nil && $0.camera == nil && $0.name != "mazeCamera" }
@@ -303,6 +305,7 @@ struct IDEMazeSceneKitView: UIViewRepresentable {
         weak var scnView: SCNView?
         var camNode: SCNNode?
 
+        var lastResetTrigger: Int = -1
         static let defaultQ: simd_quatf = simd_normalize(
             simd_quatf(angle: 0.52, axis: SIMD3<Float>(0,1,0)) *
             simd_quatf(angle: -0.38, axis: SIMD3<Float>(1,0,0)))
