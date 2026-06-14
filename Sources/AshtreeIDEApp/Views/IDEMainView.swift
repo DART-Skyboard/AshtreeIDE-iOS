@@ -434,7 +434,12 @@ struct IDEDrawerFilesTab: View {
                         Button {
                             ideVM.saveLocally()
                         } label: {
-                            Label("Save Current to Device", systemImage: "square.and.arrow.down").foregroundColor(themeVM.dim)
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.and.arrow.down")
+                                    .foregroundColor(ideVM.isDirty ? themeVM.accent : themeVM.dim)
+                                Text(ideVM.isDirty ? "Save to Device ●" : "Save to Device")
+                                    .foregroundColor(ideVM.isDirty ? themeVM.accent : themeVM.dim)
+                            }
                         }
                     } header: {
                         Text("LOCAL DEVICE FILES").font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -540,7 +545,7 @@ struct IDEDrawerSettingsTab: View {
             Section {
                 LabeledContent("Compiler", value: "LEATR v2.0").foregroundColor(themeVM.text)
                 LabeledContent("Switch Eq.", value: "(xa²√xa) ± 1").foregroundColor(themeVM.text)
-                LabeledContent("OOO Count", value: "25 Orders of Operation").foregroundColor(themeVM.text)
+                LabeledContent("LEATR", value: "25 Orders of Operation").foregroundColor(themeVM.text)
                 LabeledContent("Tools 1-7", value: "Maze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors").foregroundColor(themeVM.text)
                 LabeledContent("Math 8-19", value: "Parentheses · Exponents · ×÷ · +- · Log · Trig · Temp · Vel · Pressure · Mass · Photosyn.").foregroundColor(themeVM.text)
                 LabeledContent("Senses 20-25", value: "Touch · Taste · Vision · Smell · Hear · Proprioception").foregroundColor(themeVM.text)
@@ -590,16 +595,24 @@ struct IDEDrawerProfileTab: View {
                                 .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
                         }
                         Spacer()
-                        // Set active button
                         if !acc.isActive {
-                            Button("Use") { authVM.setActiveAccount(acc.provider) }
-                                .font(.system(size: 9, weight: .semibold)).foregroundColor(themeVM.accent)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(themeVM.accent.opacity(0.1)).cornerRadius(4)
+                            // Switch active session to this account
+                            Button("Use") {
+                                authVM.setActiveAccount(acc.provider)
+                            }
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(themeVM.accent)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(themeVM.accent.opacity(0.12)).cornerRadius(4)
                         }
-                        // Disconnect button
-                        Button("✕") { authVM.disconnectAccount(acc.provider) }
-                            .font(.system(size: 9)).foregroundColor(.red)
+                        // Disconnect — only on explicit ✕ tap
+                        Button {
+                            authVM.disconnectAccount(acc.provider)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.red.opacity(0.7))
+                        }
                     }
                 }
             }
