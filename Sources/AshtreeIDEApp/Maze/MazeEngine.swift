@@ -227,6 +227,7 @@ public final class MazeViewModel: ObservableObject {
     @Published public var result: MazeResult?
     @Published public var isGenerating = false
     @Published public var showSolution = false
+    public var resetCamera: (() -> Void)?
     @Published public var statusText = "Configure and generate a maze"
     @Published public var sceneNode: SCNNode?
 
@@ -257,7 +258,7 @@ public final class MazeViewModel: ObservableObject {
                                  mode: .cubic, w: cfg.width, h: cfg.height, d: cfg.depth)
             }
 
-            let node = await self.buildScene(result: res)
+            let node = await self.buildGlassScene(result: res)
             await MainActor.run { [weak self] in
                 self?.result = res
                 self?.sceneNode = node
@@ -272,152 +273,6 @@ public final class MazeViewModel: ObservableObject {
         showSolution = true
         let pathNode = buildPathNode(result: r)
         sceneNode?.addChildNode(pathNode)
-    }
-
-    // MARK: - SceneKit Scene Builder
-
-    private func buildScene(result r: MazeResult) -> SCNNode {
-        let root = SCNNode()
-        let s: Float = 0.5   // cell size
-        let t: Float = 0.025 // wall thickness
-
-        let wallMat = SCNMaterial()
-        wallMat.diffuse.contents  = UIColor(red: 0.0, green: 1.0, blue: 0.8, alpha: 0.45)
-        wallMat.emission.contents = UIColor(red: 0.0, green: 0.4, blue: 0.3, alpha: 0.15)
-        wallMat.lightingModel = .physicallyBased
-        wallMat.metalness.contents = 0.9
-        wallMat.roughness.contents = 0.1
-        wallMat.isDoubleSided = true
-
-        let entryMat = SCNMaterial()
-        entryMat.diffuse.contents  = UIColor.green
-        entryMat.emission.contents = UIColor.green
-        entryMat.lightingModel = .constant
-
-        let exitMat = SCNMaterial()
-        exitMat.diffuse.contents  = UIColor.red
-        exitMat.emission.contents = UIColor.red
-        exitMat.lightingModel = .constant
-
-        if r.mode == .planar, let g = r.planarGrid {
-            let w = r.w, h = r.h
-            let ox = Float(w) * s * 0.5
-            let oz = Float(h) * s * 0.5
-
-            for y in 0..<h { for x in 0..<w {
-                let cell = g[y][x]
-                let cx = Float(x) * s - ox + s * 0.5
-                let cz = Float(y) * s - oz + s * 0.5
-
-                // E wall
-                if cell.E && x < w-1 {
-                    let geo = SCNBox(width: CGFloat(t), height: CGFloat(s), length: CGFloat(s), chamferRadius: 0)
-                    let n = SCNNode(geometry: geo)
-                    n.geometry?.firstMaterial = wallMat
-                    n.position = SCNVector3(cx + s*0.5, 0, cz)
-                    root.addChildNode(n)
-                }
-                // S wall
-                if cell.S && y < h-1 {
-                    let geo = SCNBox(width: CGFloat(s), height: CGFloat(s), length: CGFloat(t), chamferRadius: 0)
-                    let n = SCNNode(geometry: geo)
-                    n.geometry?.firstMaterial = wallMat
-                    n.position = SCNVector3(cx, 0, cz + s*0.5)
-                    root.addChildNode(n)
-                }
-            }}
-
-            // Perimeter (skipping entry/exit openings)
-            let (ex, ey) = (r.entry.x, r.entry.y)
-            let (xx, xy) = (r.exit.x, r.exit.y)
-
-            for x in 0..<w {
-                if !(ex == x && ey == 0) && !(xx == x && xy == 0) {
-                    let geo = SCNBox(width: CGFloat(s), height: CGFloat(s), length: CGFloat(t), chamferRadius: 0)
-                    let n = SCNNode(geometry: geo); n.geometry?.firstMaterial = wallMat
-                    n.position = SCNVector3(Float(x)*s - ox + s*0.5, 0, -oz)
-                    root.addChildNode(n)
-                }
-                if !(ex == x && ey == h-1) && !(xx == x && xy == h-1) {
-                    let geo = SCNBox(width: CGFloat(s), height: CGFloat(s), length: CGFloat(t), chamferRadius: 0)
-                    let n = SCNNode(geometry: geo); n.geometry?.firstMaterial = wallMat
-                    n.position = SCNVector3(Float(x)*s - ox + s*0.5, 0, Float(h)*s - oz)
-                    root.addChildNode(n)
-                }
-            }
-            for y in 0..<h {
-                if !(ex == 0 && ey == y) && !(xx == 0 && xy == y) {
-                    let geo = SCNBox(width: CGFloat(t), height: CGFloat(s), length: CGFloat(s), chamferRadius: 0)
-                    let n = SCNNode(geometry: geo); n.geometry?.firstMaterial = wallMat
-                    n.position = SCNVector3(-ox, 0, Float(y)*s - oz + s*0.5)
-                    root.addChildNode(n)
-                }
-                if !(ex == w-1 && ey == y) && !(xx == w-1 && xy == y) {
-                    let geo = SCNBox(width: CGFloat(t), height: CGFloat(s), length: CGFloat(s), chamferRadius: 0)
-                    let n = SCNNode(geometry: geo); n.geometry?.firstMaterial = wallMat
-                    n.position = SCNVector3(Float(w)*s - ox, 0, Float(y)*s - oz + s*0.5)
-                    root.addChildNode(n)
-                }
-            }
-
-        } else if r.mode == .cubic, let g = r.cubicGrid {
-            let w = r.w, h = r.h, d = r.d
-            let ox = Float(w)*s*0.5, oy = Float(h)*s*0.5, oz = Float(d)*s*0.5
-
-            for z in 0..<d { for y in 0..<h { for x in 0..<w {
-                let cell = g[z][y][x]
-                let cx = Float(x)*s - ox + s*0.5
-                let cy = Float(y)*s - oy + s*0.5
-                let cz = Float(z)*s - oz + s*0.5
-                let tube = SCNCylinder(radius: CGFloat(t), height: CGFloat(s*0.48))
-                tube.radialSegmentCount = 6
-                let mat = SCNMaterial()
-                mat.diffuse.contents  = UIColor(red:0,green:0.9,blue:1,alpha:0.5)
-                mat.emission.contents = UIColor(red:0,green:0.4,blue:0.5,alpha:0.3)
-                mat.lightingModel = .constant
-
-                func addTube(dx: Float, dy: Float, dz: Float, angle: SCNVector3) {
-                    let n = SCNNode(geometry: tube)
-                    n.geometry?.firstMaterial = mat
-                    n.position = SCNVector3(cx+dx*s*0.25, cy+dy*s*0.25, cz+dz*s*0.25)
-                    n.eulerAngles = angle
-                    root.addChildNode(n)
-                }
-                if !cell.right  { addTube(dx:1,dy:0,dz:0, angle:SCNVector3(0,0,Float.pi/2)) }
-                if !cell.top    { addTube(dx:0,dy:1,dz:0, angle:SCNVector3(0,0,0)) }
-                if !cell.front  { addTube(dx:0,dy:0,dz:1, angle:SCNVector3(Float.pi/2,0,0)) }
-
-                // Cell sphere
-                let sphere = SCNSphere(radius: CGFloat(t*1.5))
-                sphere.segmentCount = 6
-                sphere.firstMaterial = mat
-                let sn = SCNNode(geometry: sphere)
-                sn.position = SCNVector3(cx, cy, cz)
-                root.addChildNode(sn)
-            }}}
-        }
-
-        // Entry marker
-        let entrySphere = SCNSphere(radius: 0.06)
-        entrySphere.firstMaterial = entryMat
-        let entryNode = SCNNode(geometry: entrySphere)
-        entryNode.position = SCNVector3(
-            Float(r.entry.x)*s - Float(r.w)*s*0.5 + s*0.5,
-            Float(r.entry.y)*s - Float(r.h)*s*0.5 + s*0.5,
-            Float(r.entry.z)*s - Float(r.d)*s*0.5 + s*0.5)
-        root.addChildNode(entryNode)
-
-        // Exit marker
-        let exitSphere = SCNSphere(radius: 0.06)
-        exitSphere.firstMaterial = exitMat
-        let exitNode = SCNNode(geometry: exitSphere)
-        exitNode.position = SCNVector3(
-            Float(r.exit.x)*s - Float(r.w)*s*0.5 + s*0.5,
-            Float(r.exit.y)*s - Float(r.h)*s*0.5 + s*0.5,
-            Float(r.exit.z)*s - Float(r.d)*s*0.5 + s*0.5)
-        root.addChildNode(exitNode)
-
-        return root
     }
 
     private func buildPathNode(result r: MazeResult) -> SCNNode {
