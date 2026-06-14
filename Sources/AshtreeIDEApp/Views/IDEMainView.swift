@@ -1,0 +1,542 @@
+// ============================================================
+//  IDEMainView.swift — Main IDE Layout with Side Drawer
+//  Ash Tree IDE · © 2025 DART Meadow | Radical Deepscale LLC.
+// ============================================================
+
+import SwiftUI
+
+struct IDEMainView: View {
+    @EnvironmentObject var authVM:  IDEAuthViewModel
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    @EnvironmentObject var mazeVM:  MazeViewModel
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                // ── Main content ──────────────────────────────────────
+                VStack(spacing: 0) {
+                    IDETopBar()
+                    IDETabContent()
+                    IDEBottomBar()
+                }
+                .background(themeVM.bg)
+                .offset(x: ideVM.showDrawer ? min(geo.size.width * 0.78, 300) : 0)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ideVM.showDrawer)
+
+                // ── Dim overlay when drawer open ──────────────────────
+                if ideVM.showDrawer {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                        .offset(x: min(geo.size.width * 0.78, 300))
+                        .onTapGesture { withAnimation { ideVM.showDrawer = false } }
+                }
+
+                // ── Side drawer ───────────────────────────────────────
+                IDESideDrawer()
+                    .frame(width: min(geo.size.width * 0.78, 300))
+                    .offset(x: ideVM.showDrawer ? 0 : -min(geo.size.width * 0.78, 300))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ideVM.showDrawer)
+            }
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+}
+
+// MARK: - Top Bar
+
+struct IDETopBar: View {
+    @EnvironmentObject var authVM:  IDEAuthViewModel
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Hamburger / avatar
+            Button {
+                withAnimation { ideVM.showDrawer.toggle() }
+            } label: {
+                if let img = authVM.avatarImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 28, height: 28)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(themeVM.accent.opacity(0.4), lineWidth: 1))
+                } else {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(themeVM.text)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .padding(.leading, 4)
+
+            Spacer()
+
+            // Wordmark
+            VStack(spacing: 1) {
+                Text("ASH TREE IDE")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(themeVM.text)
+                    .kerning(2)
+                Text("LEATR v2")
+                    .font(.system(size: 7, weight: .medium, design: .monospaced))
+                    .foregroundColor(themeVM.accent.opacity(0.7))
+                    .kerning(1)
+            }
+
+            Spacer()
+
+            // Build & Run
+            Button {
+                Task { await ideVM.buildAndRun() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: ideVM.isCompiling ? "ellipsis" : "play.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(ideVM.isCompiling ? "…" : "RUN")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .foregroundColor(themeVM.bg)
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(themeVM.accent)
+                .cornerRadius(8)
+            }
+            .disabled(ideVM.isCompiling)
+            .padding(.trailing, 10)
+        }
+        .frame(height: 50)
+        .background(themeVM.bg)
+        .overlay(Divider().background(themeVM.border), alignment: .bottom)
+    }
+}
+
+// MARK: - Tab Bar + Content
+
+struct IDETabContent: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Compact tab bar
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(IDETab.allCases, id: \.self) { tab in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) { ideVM.selectedTab = tab }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: tab.icon)
+                                    .font(.system(size: 10, weight: ideVM.selectedTab == tab ? .semibold : .regular))
+                                Text(tab.rawValue)
+                                    .font(.system(size: 10, weight: ideVM.selectedTab == tab ? .semibold : .regular))
+                            }
+                            .foregroundColor(ideVM.selectedTab == tab ? themeVM.accent : themeVM.dim)
+                            .padding(.horizontal, 14)
+                            .frame(height: 36)
+                            .overlay(
+                                Rectangle()
+                                    .fill(ideVM.selectedTab == tab ? themeVM.accent : .clear)
+                                    .frame(height: 2),
+                                alignment: .bottom
+                            )
+                        }
+                    }
+                }
+            }
+            .background(themeVM.bg)
+            .overlay(Divider().background(themeVM.border), alignment: .bottom)
+
+            // Content
+            Group {
+                switch ideVM.selectedTab {
+                case .editor:   IDEEditorView()
+                case .output:   IDECompilerOutputView()
+                case .terminal: IDETerminalView()
+                case .files:    IDEFilesView()
+                case .maze:     IDEMazeView()
+                case .docs:     IDEDocsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+// MARK: - Bottom Status Bar
+
+struct IDEBottomBar: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // File name
+            Label(ideVM.currentFile + (ideVM.isDirty ? " ●" : ""), systemImage: "doc.text")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(themeVM.dim)
+
+            Spacer()
+
+            // Shell + buoyancy
+            if ideVM.compiler.nodeCount > 0 {
+                Text("SHELL: \(ideVM.compiler.shellType)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(shellColor(ideVM.compiler.shellType))
+                Text("BUOY: \(String(format: "%.4f", ideVM.compiler.buoyancy))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(themeVM.dim)
+                Text("\(ideVM.compiler.nodeCount) nodes")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(themeVM.dim)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 26)
+        .background(themeVM.surface)
+        .overlay(Divider().background(themeVM.border), alignment: .top)
+    }
+
+    func shellColor(_ shell: String) -> Color {
+        switch shell {
+        case "GEOLOGICAL": return .brown
+        case "MARITIME":   return themeVM.accent
+        case "AEROSPACE":  return .purple
+        default:           return themeVM.dim
+        }
+    }
+}
+
+// MARK: - Side Drawer
+
+struct IDESideDrawer: View {
+    @EnvironmentObject var authVM:  IDEAuthViewModel
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Profile header
+            IDEDrawerProfileHeader()
+
+            // Drawer tab pills
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(IDEState.DrawerTab.allCases, id: \.self) { tab in
+                        Button {
+                            ideVM.drawerTab = tab
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: tab.icon).font(.system(size: 10))
+                                Text(tab.rawValue).font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(ideVM.drawerTab == tab ? themeVM.bg : themeVM.dim)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(ideVM.drawerTab == tab ? themeVM.accent : themeVM.surface)
+                            .cornerRadius(8)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+            .background(themeVM.bg)
+            .overlay(Divider().background(themeVM.border), alignment: .bottom)
+
+            // Content
+            switch ideVM.drawerTab {
+            case .files:    IDEDrawerFilesTab()
+            case .repos:    IDEDrawerReposTab()
+            case .settings: IDEDrawerSettingsTab()
+            case .profile:  IDEDrawerProfileTab()
+            case .about:    IDEDrawerAboutTab()
+            }
+
+            Spacer()
+        }
+        .background(Color(hex: "#0d1117"))
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - Drawer Profile Header
+
+struct IDEDrawerProfileHeader: View {
+    @EnvironmentObject var authVM:  IDEAuthViewModel
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // GitHub avatar
+            if let img = authVM.avatarImage {
+                Image(uiImage: img)
+                    .resizable().scaledToFill()
+                    .frame(width: 44, height: 44).clipShape(Circle())
+                    .overlay(Circle().stroke(themeVM.accent.opacity(0.4), lineWidth: 1))
+            } else {
+                Circle()
+                    .fill(themeVM.surface)
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .foregroundColor(themeVM.dim)
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(authVM.username.isEmpty ? "Ash Tree IDE" : authVM.username)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(themeVM.text)
+                if authVM.githubConnected {
+                    Label("@\(authVM.githubUsername)", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(themeVM.accent.opacity(0.7))
+                } else if authVM.isGuest {
+                    Text("Guest mode")
+                        .font(.system(size: 10))
+                        .foregroundColor(themeVM.dim)
+                }
+            }
+
+            Spacer()
+
+            // Close drawer
+            Button { withAnimation { IDEStateShared.shared.showDrawer = false } } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(themeVM.dim)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 60) // safe area
+        .padding(.bottom, 14)
+        .background(Color(hex: "#161b22"))
+    }
+}
+
+// Quick access to ideVM without EnvironmentObject threading
+final class IDEStateShared {
+    static let shared = IDEStateShared()
+    var showDrawer = false
+}
+
+// MARK: - Drawer Tabs Content
+
+struct IDEDrawerFilesTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        List {
+            Section {
+                // New file
+                Button {
+                    ideVM.newFile()
+                    withAnimation { ideVM.showDrawer = false }
+                } label: {
+                    Label("New File", systemImage: "plus.square")
+                        .foregroundColor(themeVM.accent)
+                }
+
+                // Examples
+                ForEach(ideVM.examples, id: \.name) { ex in
+                    Button {
+                        ideVM.loadExample(ex.code, name: ex.name.lowercased().replacingOccurrences(of: " ", with: "_"))
+                        withAnimation { ideVM.showDrawer = false }
+                    } label: {
+                        Label(ex.name, systemImage: ex.icon)
+                            .foregroundColor(themeVM.text)
+                    }
+                }
+            } header: {
+                Text("EXAMPLE SCRIPTS")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(themeVM.dim)
+                    .kerning(1)
+            }
+        }
+        .listStyle(.plain)
+        .background(Color.clear)
+        .scrollContentBackground(.hidden)
+    }
+}
+
+struct IDEDrawerReposTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("REPOSITORIES")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(themeVM.dim)
+                    .kerning(1)
+                Spacer()
+                Button { Task { await ideVM.loadRepos() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundColor(themeVM.dim)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            if ideVM.isLoadingFiles {
+                ProgressView().tint(themeVM.accent).padding()
+            } else if ideVM.repos.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "folder.badge.questionmark")
+                        .font(.system(size: 32))
+                        .foregroundColor(themeVM.dim.opacity(0.4))
+                    Text("No repositories loaded")
+                        .font(.system(size: 12))
+                        .foregroundColor(themeVM.dim)
+                    Button("Load Repos") { Task { await ideVM.loadRepos() } }
+                        .font(.system(size: 11))
+                        .foregroundColor(themeVM.accent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+            } else {
+                List(ideVM.repos) { repo in
+                    Button {
+                        Task { await ideVM.loadFiles(repo: repo) }
+                        ideVM.drawerTab = .files
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(repo.name, systemImage: repo.isPrivate ? "lock.fill" : "folder")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(themeVM.text)
+                            if let desc = repo.description, !desc.isEmpty {
+                                Text(desc)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(themeVM.dim)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+}
+
+struct IDEDrawerSettingsTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        List {
+            Section {
+                // Theme picker
+                Picker("Theme", selection: $themeVM.current) {
+                    ForEach(IDEThemeViewModel.Theme.allCases, id: \.self) { t in
+                        HStack {
+                            Circle().fill(t.accent).frame(width: 8, height: 8)
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                }
+                .tint(themeVM.accent)
+            } header: {
+                Text("APPEARANCE").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+
+            Section {
+                LabeledContent("Compiler", value: "LEATR v2.0")
+                    .foregroundColor(themeVM.text)
+                LabeledContent("Switch Eq.", value: "(xa²√xa) ± 1")
+                    .foregroundColor(themeVM.text)
+                LabeledContent("OOO Tools", value: "19 natural orders")
+                    .foregroundColor(themeVM.text)
+                LabeledContent("Maze", value: "LEMAC + D3.e algorithm")
+                    .foregroundColor(themeVM.text)
+            } header: {
+                Text("COMPILER").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
+
+struct IDEDrawerProfileTab: View {
+    @EnvironmentObject var authVM:  IDEAuthViewModel
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Username", value: authVM.username).foregroundColor(themeVM.text)
+                if authVM.githubConnected {
+                    LabeledContent("GitHub", value: "@\(authVM.githubUsername)").foregroundColor(themeVM.text)
+                }
+                if !authVM.appleUserId.isEmpty {
+                    LabeledContent("Apple ID", value: "Signed in").foregroundColor(themeVM.text)
+                }
+            } header: {
+                Text("ACCOUNT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+
+            Section {
+                Button(role: .destructive) { authVM.signOut() } label: {
+                    Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
+
+struct IDEDrawerAboutTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+
+    var body: some View {
+        List {
+            Section {
+                Link(destination: URL(string: "https://radicaldeepscale.com")!) {
+                    Label("Radical Deepscale", systemImage: "globe")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://dartmeadow.com")!) {
+                    Label("DART Meadow", systemImage: "globe")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://github.com/DART-Skyboard/AshtreeIDE-iOS")!) {
+                    Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://radicaldeepscale.com/ashtreeide.html")!) {
+                    Label("Ash Tree IDE Web", systemImage: "safari")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://leatr.xyz")!) {
+                    Label("LEATR", systemImage: "book")
+                        .foregroundColor(themeVM.accent)
+                }
+            } header: {
+                Text("LINKS").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+
+            Section {
+                LabeledContent("App", value: "Ash Tree IDE").foregroundColor(themeVM.text)
+                LabeledContent("Version", value: "1.0.0").foregroundColor(themeVM.text)
+                LabeledContent("Compiler", value: "LEATR v2").foregroundColor(themeVM.text)
+                LabeledContent("Author", value: "Justin Craig Venable").foregroundColor(themeVM.text)
+                LabeledContent("Company", value: "DART Meadow | Radical Deepscale LLC.").foregroundColor(themeVM.text)
+            } header: {
+                Text("ABOUT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
