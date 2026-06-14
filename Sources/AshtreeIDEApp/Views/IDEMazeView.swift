@@ -504,7 +504,7 @@ extension MazeViewModel {
             let n = SCNNode(geometry: sphere); n.position = pos; root.addChildNode(n)
 
             // Pulsing ring
-            let ring = SCNTorus(ringRadius: 0.14, pipeRadius: 0.02); ring.segmentCount = 24
+            let ring = SCNTorus(ringRadius: 0.14, pipeRadius: 0.02); ring.ringSegmentCount = 24; ring.pipeSegmentCount = 8
             ring.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.6)
             ring.firstMaterial?.lightingModel = .constant
             let rn = SCNNode(geometry: ring); rn.position = pos; root.addChildNode(rn)
