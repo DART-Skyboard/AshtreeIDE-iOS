@@ -448,15 +448,27 @@ struct IDEGLOutputPanel: View {
                 Spacer()
                 if isRendering {
                     ProgressView().scaleEffect(0.7).tint(Color(hex: "#00e5ff"))
-                        .padding(.horizontal, 10)
-                } else if showArcEdge || glScene != nil {
-                    Button("↺ Reset") {
-                        showArcEdge = false; glScene = nil
-                        Task { await buildGLScene() }
+                        .padding(.horizontal, 6)
+                } else {
+                    // Always show Render 3D button + Reset if rendered
+                    if showArcEdge || glScene != nil {
+                        Button("↺ Reset") {
+                            showArcEdge = false; glScene = nil
+                        }
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(Color(hex: "#4a5568"))
+                        .padding(.trailing, 6)
                     }
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Color(hex: "#00e5ff"))
-                    .padding(.horizontal, 10)
+                    Button {
+                        Task { await buildGLScene() }
+                    } label: {
+                        Text("▸ Render 3D")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Color(hex: "#00e5ff"))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Color(hex: "#00e5ff").opacity(0.1))
+                            .cornerRadius(6)
+                    }
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -481,6 +493,10 @@ struct IDEGLOutputPanel: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(hex: "#0d1117"))
             }
+        }
+        // Auto-render when panel appears or when .id() changes (each compile)
+        .task {
+            await buildGLScene()
         }
     }
 
