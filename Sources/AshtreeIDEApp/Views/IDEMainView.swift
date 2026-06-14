@@ -347,7 +347,7 @@ struct IDEDrawerFilesTab: View {
                             ideVM.newFile()
                             withAnimation { ideVM.showDrawer = false }
                         } label: {
-                            Label("New File", systemImage: "plus.square").foregroundColor(themeVM.accent)
+                            Label("New Project", systemImage: "folder.badge.plus").foregroundColor(themeVM.accent)
                         }
                         ForEach(ideVM.examples, id: \.name) { ex in
                             Button {
@@ -358,7 +358,7 @@ struct IDEDrawerFilesTab: View {
                             }
                         }
                     } header: {
-                        Text("EXAMPLE SCRIPTS").font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        Text("EXAMPLE PROJECTS").font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(themeVM.dim).kerning(1)
                     }
 
@@ -398,8 +398,21 @@ struct IDEDrawerFilesTab: View {
                                 .foregroundColor(themeVM.dim).kerning(1)
                         }
                     } else {
-                        Text("Select a repository from the Repos tab")
-                            .font(.system(size: 11)).foregroundColor(themeVM.dim).padding()
+                        VStack(spacing: 12) {
+                            Image(systemName:"folder.badge.questionmark")
+                                .font(.system(size:32)).foregroundColor(themeVM.dim.opacity(0.3))
+                            Text("Open a repository from the Repos tab")
+                                .font(.system(size:11)).foregroundColor(themeVM.dim)
+                                .multilineTextAlignment(.center)
+                            Button("Go to Repos") {
+                                ideVM.drawerTab = .repos
+                                Task { await ideVM.loadRepos() }
+                            }
+                            .font(.system(size:10,weight:.semibold,design:.monospaced))
+                            .foregroundColor(themeVM.accent)
+                        }
+                        .frame(maxWidth:.infinity)
+                        .padding(.top,30)
                     }
 
                 case .local:
@@ -525,14 +538,15 @@ struct IDEDrawerSettingsTab: View {
             }
 
             Section {
-                LabeledContent("Compiler", value: "LEATR v2.0")
-                    .foregroundColor(themeVM.text)
-                LabeledContent("Switch Eq.", value: "(xa²√xa) ± 1")
-                    .foregroundColor(themeVM.text)
-                LabeledContent("OOO Tools", value: "19 natural orders")
-                    .foregroundColor(themeVM.text)
-                LabeledContent("Maze", value: "LEMAC + D3.e algorithm")
-                    .foregroundColor(themeVM.text)
+                LabeledContent("Compiler", value: "LEATR v2.0").foregroundColor(themeVM.text)
+                LabeledContent("Switch Eq.", value: "(xa²√xa) ± 1").foregroundColor(themeVM.text)
+                LabeledContent("OOO Count", value: "25 Orders of Operation").foregroundColor(themeVM.text)
+                LabeledContent("Tools 1-7", value: "Maze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors").foregroundColor(themeVM.text)
+                LabeledContent("Math 8-19", value: "Parentheses · Exponents · ×÷ · +- · Log · Trig · Temp · Vel · Pressure · Mass · Photosyn.").foregroundColor(themeVM.text)
+                LabeledContent("Senses 20-25", value: "Touch · Taste · Vision · Smell · Hear · Proprioception").foregroundColor(themeVM.text)
+                LabeledContent("BRPN", value: "Buoyancy Reflex Pendulum Node").foregroundColor(themeVM.text)
+                LabeledContent("Shells", value: "Aerospace / Maritime / Geological").foregroundColor(themeVM.text)
+                LabeledContent("Maze", value: "LEMAC + D3.e algorithm").foregroundColor(themeVM.text)
             } header: {
                 Text("COMPILER").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
             }
@@ -561,33 +575,31 @@ struct IDEDrawerProfileTab: View {
             }
 
             Section("CONNECTED ACCOUNTS") {
-                // Show all saved accounts with disconnect buttons
                 ForEach(authVM.savedAccounts) { acc in
                     HStack {
-                        Image(systemName: acc.provider == "github" ? "chevron.left.forwardslash.chevron.right" : acc.provider == "apple" ? "apple.logo" : "person.fill")
-                            .font(.system(size: 12)).foregroundColor(themeVM.accent)
+                        // Active indicator
+                        Image(systemName: acc.isActive ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 12))
+                            .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
+                        Image(systemName: acc.provider == "github" ? "chevron.left.forwardslash.chevron.right" : "apple.logo")
+                            .font(.system(size: 11)).foregroundColor(themeVM.accent)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(acc.username).font(.system(size: 12, weight: .medium)).foregroundColor(themeVM.text)
-                            Text(acc.provider.capitalized).font(.system(size: 9)).foregroundColor(themeVM.dim)
+                            Text(acc.isActive ? "Active session" : acc.provider.capitalized)
+                                .font(.system(size: 9))
+                                .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
                         }
                         Spacer()
-                        // Disconnect individual account
-                        Button("Disconnect") {
-                            if acc.provider == "github" {
-                                Task { await IDEGitHubClient.shared.clearToken() }
-                                KeychainHelper.delete(key: "ide_github_pat")
-                                KeychainHelper.delete(key: "ide_github_username")
-                                KeychainHelper.delete(key: "ide_github_avatar_url")
-                                authVM.githubConnected = false; authVM.githubUsername = ""
-                            } else if acc.provider == "apple" {
-                                KeychainHelper.delete(key: "ide_apple_uid")
-                                KeychainHelper.delete(key: "ide_apple_name")
-                                authVM.appleUserId = ""
-                            }
-                            // If no accounts remain, sign out
-                            if authVM.savedAccounts.isEmpty { authVM.signOut() }
+                        // Set active button
+                        if !acc.isActive {
+                            Button("Use") { authVM.setActiveAccount(acc.provider) }
+                                .font(.system(size: 9, weight: .semibold)).foregroundColor(themeVM.accent)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(themeVM.accent.opacity(0.1)).cornerRadius(4)
                         }
-                        .font(.system(size: 9)).foregroundColor(.red)
+                        // Disconnect button
+                        Button("✕") { authVM.disconnectAccount(acc.provider) }
+                            .font(.system(size: 9)).foregroundColor(.red)
                     }
                 }
             }
@@ -604,11 +616,17 @@ struct IDEDrawerProfileTab: View {
                 }
                 // Add Apple if not connected
                 if authVM.appleUserId.isEmpty {
-                    Button {
-                        authVM.signInWithApple()
-                    } label: {
+                    // Use UIViewRepresentable to avoid "not in hierarchy" crash from sidebar
+                    VStack(alignment: .leading, spacing: 4) {
                         Label("Connect Apple ID", systemImage: "apple.logo")
+                            .font(.system(size: 11))
                             .foregroundColor(themeVM.accent)
+                        AppleSignInButton(
+                            onRequest: { req in authVM.prepareAppleRequest(req) },
+                            onCompletion: { result in authVM.handleAppleCompletion(result) }
+                        )
+                        .frame(height: 44)
+                        .cornerRadius(8)
                     }
                 }
             }
