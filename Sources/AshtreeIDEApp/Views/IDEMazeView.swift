@@ -291,13 +291,7 @@ struct IDEMazeSceneKitView: UIViewRepresentable {
             .forEach { $0.removeFromParentNode() }
         v.scene?.rootNode.addChildNode(rootNode)
 
-        // Gentle auto-rotation
-        rootNode.removeAnimation(forKey: "autoRotate")
-        let rotation = CABasicAnimation(keyPath: "rotation")
-        rotation.toValue  = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
-        rotation.duration = 45
-        rotation.repeatCount = .infinity
-        rootNode.addAnimation(rotation, forKey: "autoRotate")
+        // Auto-rotation disabled — use orbit controls to manipulate
     }
 
     // MARK: Coordinator — ArcLake orbit controls ported exactly
