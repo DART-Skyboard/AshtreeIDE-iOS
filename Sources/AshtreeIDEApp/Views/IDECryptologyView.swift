@@ -7,7 +7,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import CryptoKit
-import ZIPFoundation
+// ZIP implemented natively below (no external dependency)
 
 // MARK: - Cryptology ViewModel
 
