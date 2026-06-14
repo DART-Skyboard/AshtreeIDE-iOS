@@ -464,7 +464,7 @@ struct IDEGLOutputPanel: View {
             .overlay(Divider().background(Color(hex: "#00e5ff").opacity(0.2)), alignment: .bottom)
 
             if let node = glScene {
-                IDEMazeSceneKitView(rootNode: node, resetCamera: {})
+                IDEMazeSceneKitView(rootNode: node, resetTrigger: 0)
             } else if showArcEdge {
                 ArcEdgeSceneView()
             } else {
