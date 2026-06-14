@@ -495,15 +495,13 @@ extension MazeViewModel {
             }}}
         }
 
-        // Entry/exit markers
+        // Entry/exit markers — for planar maze, placed AT the perimeter opening (outside the wall)
         func marker(_ pos: SCNVector3, _ color: UIColor) {
             let sphere = SCNSphere(radius: 0.08); sphere.segmentCount = 8
             sphere.firstMaterial?.diffuse.contents  = color
             sphere.firstMaterial?.emission.contents = color
             sphere.firstMaterial?.lightingModel = .constant
             let n = SCNNode(geometry: sphere); n.position = pos; root.addChildNode(n)
-
-            // Pulsing ring
             let ring = SCNTorus(ringRadius: 0.14, pipeRadius: 0.02); ring.ringSegmentCount = 24; ring.pipeSegmentCount = 8
             ring.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.6)
             ring.firstMaterial?.lightingModel = .constant
@@ -513,13 +511,32 @@ extension MazeViewModel {
             pulse.autoreverses = true; pulse.repeatCount = .infinity; rn.addAnimation(pulse, forKey: "pulse")
         }
 
-        let es = s * 0.5
-        marker(SCNVector3(Float(r.entry.x)*s - Float(r.w)*s*0.5 + es,
-                          Float(r.entry.y)*s - Float(r.h)*s*0.5 + es,
-                          Float(r.entry.z)*s - Float(r.d)*s*0.5 + es), UIColor.green)
-        marker(SCNVector3(Float(r.exit.x)*s - Float(r.w)*s*0.5 + es,
-                          Float(r.exit.y)*s - Float(r.h)*s*0.5 + es,
-                          Float(r.exit.z)*s - Float(r.d)*s*0.5 + es), UIColor.red)
+        // Planar: opening is in the perimeter wall of cell (ex,ey).
+        // Detect which edge the cell sits on; offset marker just outside that wall.
+        func planarMarkerPos(_ ex: Int, _ ey: Int, _ w: Int, _ h: Int, _ ox: Float, _ oz: Float) -> SCNVector3 {
+            let cx = Float(ex)*s - ox + s*0.5
+            let cz = Float(ey)*s - oz + s*0.5
+            if ey == 0     { return SCNVector3(cx,     0.1, -oz - s*0.35) }
+            if ey == h-1   { return SCNVector3(cx,     0.1, Float(h)*s - oz + s*0.35) }
+            if ex == 0     { return SCNVector3(-ox - s*0.35, 0.1, cz) }
+            if ex == w-1   { return SCNVector3(Float(w)*s - ox + s*0.35, 0.1, cz) }
+            return SCNVector3(cx, 0.1, cz)
+        }
+
+        if r.mode == .planar {
+            let w = r.w, h = r.h
+            let ox = Float(w)*s*0.5, oz = Float(h)*s*0.5
+            marker(planarMarkerPos(r.entry.x, r.entry.y, w, h, ox, oz), UIColor.green)
+            marker(planarMarkerPos(r.exit.x,  r.exit.y,  w, h, ox, oz), UIColor.red)
+        } else {
+            let es = s * 0.5
+            marker(SCNVector3(Float(r.entry.x)*s - Float(r.w)*s*0.5 + es,
+                              Float(r.entry.y)*s - Float(r.h)*s*0.5 + es,
+                              Float(r.entry.z)*s - Float(r.d)*s*0.5 + es), UIColor.green)
+            marker(SCNVector3(Float(r.exit.x)*s - Float(r.w)*s*0.5 + es,
+                              Float(r.exit.y)*s - Float(r.h)*s*0.5 + es,
+                              Float(r.exit.z)*s - Float(r.d)*s*0.5 + es), UIColor.red)
+        }
         return root
     }
 }
