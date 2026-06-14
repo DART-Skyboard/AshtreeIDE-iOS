@@ -180,6 +180,7 @@ public enum IDEDefaults {
         ("Autumn Core",   "leaf",        autumnCore),
         ("3D Animation",  "cube",        ash3D),
         ("Neural Scene",  "brain.head.profile", neuralScene),
+        ("Arc Edge Vector","waveform",          arcEdgeVector),
     ]
 
     static let helloWorld = """
@@ -341,4 +342,76 @@ import (GLDrivers)
   irout ("Result: " placeto (s))
 }|';'|
 """
+    static let arcEdgeVector = """
+// ARC EDGE VECTOR — Three-axis tangent spline system · LEATR v2
+// Port of arc-edge-vector.html to Ash syntax
+// Arc Edge math (Justin Craig Venable, doc=3.0 replaces π):
+//   Circumference: sqrt(d × 3)²
+//   Area: circ²    Volume: area³    Sphere SA: vol × 0.25
+//   Branch arc: circ / 8  (every branch = 1/8-circle arc)
+import (GLDrivers)
+
+{{env:ArcEdgeVector}}
+[[script:arc-edge-v1]]
+[poly: arc-edge-geometry]
+[net: vector-physics]
+
+(ArcEdgeScene):-: {
+  {{env:ArcEdgeVector}}
+  [[owner:DART-Meadow]]
+  with var (scene) var (s) {
+    irin ("background:0x060a10 fov:60 doc:3.0")
+    gl.scene
+    gl.render
+    thenplace var (scene) with var (s)
+  }
+  irout ("Result: " placeto (scene))
+}|';\'|
+
+(ArcVectorNode):-: {
+  [poly: arc-edge-spline]
+  with var (d) var (s) {
+    irin ("axis:X influence:0.5 phase:0.0 smooth:true phys:true")
+    thenplace var (s) with var (d)
+  }
+  irout ("Result: " placeto (s))
+}|';\'|
+
+(ArcVectorNode):-: {
+  [poly: arc-edge-spline]
+  with var (d) var (s) {
+    irin ("axis:Y influence:0.4 phase:1.047 smooth:true phys:true")
+    thenplace var (s) with var (d)
+  }
+  irout ("Result: " placeto (s))
+}|';\'|
+
+(ArcVectorNode):-: {
+  [poly: arc-edge-spline]
+  with var (d) var (s) {
+    irin ("axis:Z influence:0.6 phase:2.094 smooth:true phys:true")
+    thenplace var (s) with var (d)
+  }
+  irout ("Result: " placeto (s))
+}|';\'|
+
+(ArcPhysicsNode):-: {
+  [net: physics-environment]
+  with var (s) {
+    irin ("gravity:9.81 wind:15 temp:72 humidity:60 pressure:14.7")
+    thenplace var (s) with var (s)
+  }
+  irout ("Result: " placeto (s))
+}|';\'|
+
+(ArcGridNode):-: {
+  [poly: grid-integration]
+  with var (s) {
+    irin ("enabled:true xz:true xy:true zy:true arcToGrid:true")
+    thenplace var (s) with var (s)
+  }
+  irout ("Result: " placeto (s))
+}|';\'|
+"""
+
 }
