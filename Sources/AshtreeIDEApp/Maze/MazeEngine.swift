@@ -370,7 +370,7 @@ public final class MazeViewModel: ObservableObject {
                 let cy = Float(y)*s - oy + s*0.5
                 let cz = Float(z)*s - oz + s*0.5
                 let tube = SCNCylinder(radius: CGFloat(t), height: CGFloat(s*0.48))
-                tube.segmentCount = 6
+                tube.radialSegmentCount = 6
                 let mat = SCNMaterial()
                 mat.diffuse.contents  = UIColor(red:0,green:0.9,blue:1,alpha:0.5)
                 mat.emission.contents = UIColor(red:0,green:0.4,blue:0.5,alpha:0.3)
