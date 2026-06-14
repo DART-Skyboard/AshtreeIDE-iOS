@@ -444,13 +444,17 @@ struct IDEDrawerReposTab: View {
             HStack {
                 Text("REPOSITORIES")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(themeVM.dim)
-                    .kerning(1)
+                    .foregroundColor(themeVM.dim).kerning(1)
                 Spacer()
+                // Refresh/reconnect button
                 Button { Task { await ideVM.loadRepos() } } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12))
-                        .foregroundColor(themeVM.dim)
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Refresh").font(.system(size: 9))
+                    }
+                    .foregroundColor(themeVM.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(themeVM.accent.opacity(0.1)).cornerRadius(5)
                 }
             }
             .padding(.horizontal, 16)
@@ -556,9 +560,62 @@ struct IDEDrawerProfileTab: View {
                 Text("ACCOUNT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
             }
 
+            Section("CONNECTED ACCOUNTS") {
+                // Show all saved accounts with disconnect buttons
+                ForEach(authVM.savedAccounts) { acc in
+                    HStack {
+                        Image(systemName: acc.provider == "github" ? "chevron.left.forwardslash.chevron.right" : acc.provider == "apple" ? "apple.logo" : "person.fill")
+                            .font(.system(size: 12)).foregroundColor(themeVM.accent)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(acc.username).font(.system(size: 12, weight: .medium)).foregroundColor(themeVM.text)
+                            Text(acc.provider.capitalized).font(.system(size: 9)).foregroundColor(themeVM.dim)
+                        }
+                        Spacer()
+                        // Disconnect individual account
+                        Button("Disconnect") {
+                            if acc.provider == "github" {
+                                Task { await IDEGitHubClient.shared.clearToken() }
+                                KeychainHelper.delete(key: "ide_github_pat")
+                                KeychainHelper.delete(key: "ide_github_username")
+                                KeychainHelper.delete(key: "ide_github_avatar_url")
+                                authVM.githubConnected = false; authVM.githubUsername = ""
+                            } else if acc.provider == "apple" {
+                                KeychainHelper.delete(key: "ide_apple_uid")
+                                KeychainHelper.delete(key: "ide_apple_name")
+                                authVM.appleUserId = ""
+                            }
+                            // If no accounts remain, sign out
+                            if authVM.savedAccounts.isEmpty { authVM.signOut() }
+                        }
+                        .font(.system(size: 9)).foregroundColor(.red)
+                    }
+                }
+            }
+
+            Section("ADD ACCOUNT") {
+                // Add GitHub if not connected
+                if !authVM.githubConnected {
+                    Button {
+                        Task { await authVM.startGitHubDeviceFlow() }
+                    } label: {
+                        Label("Connect GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .foregroundColor(themeVM.accent)
+                    }
+                }
+                // Add Apple if not connected
+                if authVM.appleUserId.isEmpty {
+                    Button {
+                        authVM.signInWithApple()
+                    } label: {
+                        Label("Connect Apple ID", systemImage: "apple.logo")
+                            .foregroundColor(themeVM.accent)
+                    }
+                }
+            }
+
             Section {
                 Button(role: .destructive) { authVM.signOut() } label: {
-                    Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label("Sign Out All", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
         }
