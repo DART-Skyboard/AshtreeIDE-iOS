@@ -496,7 +496,7 @@ struct IDEGLOutputPanel: View {
             guard depth > 0 && length > 0.05 else { return }
             let to = SCNVector3(from.x + dir.x*length, from.y + dir.y*length, from.z + dir.z*length)
             let cyl = SCNCylinder(radius: CGFloat(length*0.06), height: CGFloat(length))
-            cyl.segmentCount = 8; cyl.firstMaterial = mat
+            cyl.radialSegmentCount = 8; cyl.firstMaterial = mat
             let n = SCNNode(geometry: cyl)
             let mid = SCNVector3((from.x+to.x)/2, (from.y+to.y)/2, (from.z+to.z)/2)
             n.position = mid
