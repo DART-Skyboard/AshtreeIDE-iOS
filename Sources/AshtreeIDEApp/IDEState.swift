@@ -84,8 +84,19 @@ public final class IDEState: ObservableObject {
     }
 
     public func newFile() {
-        sourceCode = "// New Ash script\n{{env:MyProject}}\n[[script:new-script]]\n\n"
-        currentFile = "untitled.ash"; isDirty = false
+        // Generate unique filename — never overwrite existing files
+        var base = "untitled"; var n = 1; var fname = base + ".ash"
+        while localFiles.contains(fname) || UserDefaults.standard.string(forKey:"ide_local_\(fname)") != nil {
+            fname = "\(base)_\(n).ash"; n += 1
+        }
+        sourceCode  = "// \(fname)\n// Ash Edge Language · LEATR v2\n{{env:MyProject}}\n[[script:new-script]]\n\n"
+        currentFile = fname
+        isDirty     = false
+        // Immediately persist so the file survives app restart
+        UserDefaults.standard.set(sourceCode, forKey: "ide_local_\(fname)")
+        if !localFiles.contains(fname) { localFiles.append(fname) }
+        UserDefaults.standard.set(localFiles, forKey: "ide_local_file_list")
+        UserDefaults.standard.synchronize()
     }
 
     // MARK: - GitHub
@@ -141,6 +152,7 @@ public final class IDEState: ObservableObject {
     // MARK: - Local file storage
 
     public func saveLocally() {
+        guard !currentFile.isEmpty else { return }
         let key = "ide_local_\(currentFile)"
         UserDefaults.standard.set(sourceCode, forKey: key)
         if !localFiles.contains(currentFile) { localFiles.append(currentFile) }
