@@ -389,6 +389,20 @@ struct IDEDrawerFilesTab: View {
                                             .foregroundColor(file.type == "dir" ? themeVM.accent : (file.name.hasSuffix(".ash") ? Color(hex: "#00ffcc") : themeVM.dim))
                                         Text(file.name).font(.system(size: 12, design: file.name.hasSuffix(".ash") ? .monospaced : .default))
                                             .foregroundColor(themeVM.text)
+                                        Spacer()
+                                        // Sync toggle — only for .ash files
+                                        if file.type != "dir" && file.name.hasSuffix(".ash") {
+                                            Toggle("", isOn: Binding(
+                                                get: { ideVM.syncedFiles.contains(file.path) },
+                                                set: { on in
+                                                    if on { ideVM.syncedFiles.insert(file.path) }
+                                                    else  { ideVM.syncedFiles.remove(file.path) }
+                                                }
+                                            ))
+                                            .labelsHidden()
+                                            .tint(themeVM.accent)
+                                            .scaleEffect(0.75)
+                                        }
                                     }
                                 }
                             }
@@ -444,6 +458,12 @@ struct IDEDrawerFilesTab: View {
                                 }
                             }
                         }
+                        .onDelete { offsets in
+                            for i in offsets {
+                                let name = ideVM.localFiles[i]
+                                ideVM.deleteLocalFile(name)
+                            }
+                        }
                         Button {
                             ideVM.saveLocally()
                             ideVM.exportFileToDevice = true
@@ -483,9 +503,16 @@ struct IDEDrawerReposTab: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("REPOSITORIES")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(themeVM.dim).kerning(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("REPOSITORIES")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(themeVM.dim).kerning(1)
+                    if !ideVM.syncedFiles.isEmpty {
+                        Text("\(ideVM.syncedFiles.count) file(s) syncing")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(themeVM.accent)
+                    }
+                }
                 Spacer()
                 // Refresh/reconnect button
                 Button { Task { await ideVM.loadRepos() } } label: {
