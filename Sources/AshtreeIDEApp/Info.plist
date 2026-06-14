@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleDisplayName</key>
     <string>Ash Tree IDE</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleName</key>
@@ -47,19 +49,11 @@
                 <true/>
             </dict>
             <key>api.github.com</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><false/></dict>
             <key>raw.githubusercontent.com</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><false/></dict>
         </dict>
     </dict>
-    <key>UIRequiresFullScreen</key>
-    <false/>
     <key>CFBundleURLTypes</key>
     <array/>
 </dict>
