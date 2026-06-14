@@ -502,7 +502,18 @@ struct IDEGLOutputPanel: View {
 
     private func buildGLScene() async {
         isRendering = true
-        // Delegate to Arc Edge GL driver which implements the full arc-edge-vector.html capabilities
+        // Detect if the current script uses Arc Edge Vector nodes
+        let src = ideVM.sourceCode
+        let arcKeywords = ["ArcEdgeScene","ArcVectorNode","ArcPhysicsNode","ArcGridNode",
+                           "ArcHandleNode","import (GLDrivers)","gl.arc","arc_edge"]
+        let isArcEdge = arcKeywords.contains { src.contains($0) }
+        if isArcEdge {
+            showArcEdge = true
+            isRendering  = false
+            return
+        }
+        showArcEdge = false
+        // Default tree scene for non-Arc-Edge GL scripts
         let root = SCNNode()
         let mat = SCNMaterial()
         mat.diffuse.contents  = UIColor(red: 0, green: 1, blue: 0.8, alpha: 0.7)
@@ -651,8 +662,13 @@ struct IDETerminalView: View {
                 Spacer()
 
                 Button("⏎") {
-                    ideVM.compiler.handleTerminalCommand(input, source: ideVM.sourceCode)
+                    let cmd = input
                     input = ""
+                    ideVM.compiler.handleTerminalCommand(cmd, source: ideVM.sourceCode)
+                    // Re-focus after submit so keyboard stays up and next command works
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        focused = true
+                    }
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(Color(hex: "#00ffcc"))
@@ -827,67 +843,7 @@ struct IDEDocsView: View {
                                "\n[poly:...]     — Polynomial/physics container" +
                                "\n[net:...]      — Network syntax (log-iterative mode)")
 
-                DocBlock(title: "ORDER OF OPERATIONS (19)",
-                         content: "Natural Tools (1-7):" +
-                               "\nMaze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors" +
-                               "\n\nMath/Physics (8-19):" +
-                               "\nParentheses · Exponents · Multiplication · Division" +
-                               "\nAddition · Subtraction · Logarithm · Trigonometry" +
-                               "\nTemperature · Velocity · Pressure · Mass · Photosynthesis" +
-                               "\n\nSenses (AI):" +
-                               "\nTouch · Taste · Vision · Smell · Hear")
-
-                DocBlock(title: "BRPN — PENDULUM NODE",
-                         content: "After compile, shell routing via Buoyancy Reflex:" +
-                               "\n  f = formation  (1.0 if outer-tags present)" +
-                               "\n  r = reflex     (1.0 if inner-tags present)" +
-                               "\n  p = performance (nodeCount / 5, max 1.0)" +
-                               "\n  frp = f × r × p" +
-                               "\n  buoyancy = frp × sqrt(|frp|)" +
-                               "\n\nShell: >=0.76 = GEOLOGICAL  >=0.44 = MARITIME  <0.44 = AEROSPACE")
-
-                DocBlock(title: "GL DRIVERS",
-                         content: "import (GLDrivers)  // Load 3D GL runtime" +
-                               "\n\nNodes: ThreeScene · LightNode · ArcEdgeNode" +
-                               "\n  CameraNode · ParticleNode · GeometryNode" +
-                               "\n  MaterialNode · MeshNode · AnimateNode · UIOverlayNode" +
-                               "\n\nArc Edge math (Justin Craig Venable):" +
-                               "\n  Circumference: sqrt(d×3)^2   (no pi)" +
-                               "\n  Area: circ^2   Volume: area^3   Sphere SA: vol×0.25" +
-                               "\n  Branch: 1/8-circle arc")
-
-                DocBlock(title: "KEYWORDS",
-                         content: "irin · irout · thenplace · place · placeto" +
-                               "\nResearch · Report · with · var · when · where" +
-                               "\nand · or · not · for · else · is · if · end" +
-                               "\nimport · return")
-            }
-            .padding(16)
-            }
-        }
-        .background(themeVM.bg)
-    }
-}
-
-struct DocBlock: View {
-    let title: String
-    let content: String
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundColor(themeVM.dim)
-                .kerning(1.5)
-            Text(content)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(themeVM.text.opacity(0.85))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(12)
-                .background(themeVM.surface)
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(themeVM.border, lineWidth: 0.5))
-        }
-    }
-}
+                DocBlock(title: "ORDER OF OPERATIONS (25)",
+    content: "Natural Tools (1–7):\nMaze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors\n\nMath/Physics (8–19):\nParentheses · Exponents · Multiplication · Division · Addition · Subtraction · Logarithm · Trigonometry · Temperature · Velocity · Pressure · Mass · Photosynthesis\n\nSenses / AI (20–25):\nTouch · Taste · Vision · Smell · Hearing · Proprioception\n\nBRPN — Buoyancy Reflex Pendulum Node:\nAerospace Shell · Maritime Shell · Geological Shell")
+                    )
+                    
