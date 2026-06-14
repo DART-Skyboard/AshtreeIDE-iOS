@@ -15,7 +15,7 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "iPhone Distribution"
-    PROVISIONING_PROFILE: "396bea37-3a5c-4c7f-b85b-f53fb0867fd9"
+    PROVISIONING_PROFILE: "3d6f3884-df17-4871-afc1-e1edcedc7335"
     DEVELOPMENT_TEAM: L7AHWS9Q6V
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -32,7 +32,7 @@ targets:
           - "**/*.md"
     settings:
       base:
-        PRODUCT_NAME: "Ash Tree IDE"
+        PRODUCT_NAME: AshtreeIDE
         INFOPLIST_FILE: Sources/AshtreeIDEApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/AshtreeIDEApp/AshtreeIDE.entitlements
     entitlements:
