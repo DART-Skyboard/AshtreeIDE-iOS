@@ -81,42 +81,21 @@ struct IDEWelcomeView: View {
                     if !authVM.savedAccounts.filter({ $0.provider == "apple" }).isEmpty {
                         // Resume Apple account
                         let acc = authVM.savedAccounts.first { $0.provider == "apple" }!
-                        Button {
-                            authVM.signInWithApple()
-                        } label: {
-                            HStack {
-                                Image(systemName: "apple.logo")
-                                    .font(.system(size: 16, weight: .semibold))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(acc.username)
-                                        .font(.system(size: 15, weight: .semibold))
-                                    Text("Apple · tap to sign in")
-                                        .font(.system(size: 10))
-                                        .opacity(0.7)
-                                }
-                                Spacer()
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                            }
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 20)
-                            .frame(height: 56)
-                            .background(.white)
-                            .cornerRadius(14)
-                        }
-                    } else {
-                        SignInWithAppleButton(.signIn) { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
-                            if case .success(let auth) = result {
-                                authVM.authorizationController(
-                                    controller: ASAuthorizationController(authorizationRequests: []),
-                                    didCompleteWithAuthorization: auth)
-                            }
-                        }
-                        .signInWithAppleButtonStyle(.white)
+                        // Resume Apple — use UIViewRepresentable to avoid hierarchy crash
+                        AppleSignInButton(
+                            onRequest: { req in authVM.prepareAppleRequest(req) },
+                            onCompletion: { result in authVM.handleAppleCompletion(result) }
+                        )
                         .frame(height: 56)
                         .cornerRadius(14)
+                    } else {
+                        // UIViewRepresentable Apple button — crash-safe for any presentation context
+                    AppleSignInButton(
+                        onRequest: { req in authVM.prepareAppleRequest(req) },
+                        onCompletion: { result in authVM.handleAppleCompletion(result) }
+                    )
+                    .frame(height: 56)
+                    .cornerRadius(14)
                     }
 
                     // ② GitHub — resume or new
