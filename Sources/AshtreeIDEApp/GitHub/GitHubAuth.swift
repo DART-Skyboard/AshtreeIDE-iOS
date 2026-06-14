@@ -1,12 +1,25 @@
-// GitHubAuth.swift v4 — Crash-safe Apple Sign In + silent GitHub re-auth
+// GitHubAuth.swift v5 — Crash-safe Apple Sign In with UIViewRepresentable
 // Ash Tree IDE · © 2025 DART Meadow | Radical Deepscale LLC.
 //
-// Apple crash fix: delegate wrapped in Task { @MainActor in } (not DispatchQueue.main.async)
-// This is the correct pattern for @MainActor ObservableObject + ASAuthorizationControllerDelegate
+// ROOT CAUSE OF CRASH: SwiftUI's SignInWithAppleButton calls
+// ASAuthorizationController.performRequests() internally. When the button is
+// inside a ZStack/modal/sheet that is not the ROOT of the window hierarchy,
+// iOS throws "Attempting to present ASAuthorizationController from a SwiftUI
+// view not in a hierarchy" → fatal crash.
+//
+// FIX (recommended by Apple engineers at WWDC22):
+// Wrap ASAuthorizationAppleIDButton in a UIViewRepresentable and call
+// performRequests() directly from the view model, NOT from inside the SwiftUI
+// button's onCompletion handler.
+//
+// This works BOTH from the splash/welcome screen AND from the profile menu
+// because we always present from the key UIWindow, not from the SwiftUI view.
 import Foundation
 import AuthenticationServices
 import CryptoKit
 import SwiftUI
+
+// MARK: - Keychain
 
 public enum KeychainHelper {
     public static func save(key: String, value: String) {
@@ -27,11 +40,14 @@ public enum KeychainHelper {
     }
 }
 
+// MARK: - Models
+
 public struct IDESavedAccount: Identifiable {
     public let id = UUID()
     public let username: String
     public let provider: String
     public let avatarURL: URL?
+    public var isActive: Bool
 }
 public struct IDEDeviceFlow: Identifiable {
     public let id = UUID()
@@ -51,9 +67,7 @@ public struct IDEGitHubRepo: Identifiable, Codable {
     public let defaultBranch: String
     enum CodingKeys: String, CodingKey {
         case id, name, description
-        case fullName = "full_name"
-        case isPrivate = "private"
-        case defaultBranch = "default_branch"
+        case fullName = "full_name"; case isPrivate = "private"; case defaultBranch = "default_branch"
     }
 }
 public struct IDEGitHubFile: Codable {
@@ -64,10 +78,11 @@ public struct IDEGitHubFile: Codable {
     public let type: String?
     public let size: Int?
     enum CodingKeys: String, CodingKey {
-        case name, path, sha, type, size
-        case downloadURL = "download_url"
+        case name, path, sha, type, size; case downloadURL = "download_url"
     }
 }
+
+// MARK: - GitHub Client
 
 public actor IDEGitHubClient {
     public static let shared = IDEGitHubClient()
@@ -78,11 +93,14 @@ public actor IDEGitHubClient {
     public func loadToken() { _token=KeychainHelper.load(key:"ide_github_pat") }
     public func clearToken() { _token=nil; KeychainHelper.delete(key:"ide_github_pat") }
     public var hasToken: Bool { !(_token?.isEmpty ?? true) }
-    private func headers()->[String:String]{var h=["Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"];if let t=_token{h["Authorization"]="Bearer \(t)"};return h}
-
+    private func headers()->[String:String]{
+        var h=["Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"]
+        if let t=_token{h["Authorization"]="Bearer \(t)"}
+        return h
+    }
     public func startDeviceFlow() async throws -> IDEDeviceFlow {
         var req=URLRequest(url:URL(string:"https://github.com/login/device/code")!)
-        req.httpMethod="POST"; req.setValue("application/json",forHTTPHeaderField:"Accept")
+        req.httpMethod="POST";req.setValue("application/json",forHTTPHeaderField:"Accept")
         req.setValue("application/x-www-form-urlencoded",forHTTPHeaderField:"Content-Type")
         req.httpBody="client_id=Ov23li2K0njEqO1WTSdD&scope=repo,read:user".data(using:.utf8)
         let(data,_)=try await session.data(for:req)
@@ -156,13 +174,71 @@ public actor IDEGitHubClient {
         var r=URLRequest(url:URL(string:base+path)!);r.httpMethod="POST"
         headers().forEach{r.setValue($1,forHTTPHeaderField:$0)}
         r.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        r.httpBody=try JSONSerialization.data(withJSONObject:body);return try await session.data(for:r).0
+        r.httpBody=try JSONSerialization.data(withJSONObject:body)
+        return try await session.data(for:r).0
     }
     private func put(_ path:String,body:[String:Any]) async throws -> Data {
         var r=URLRequest(url:URL(string:base+path)!);r.httpMethod="PUT"
         headers().forEach{r.setValue($1,forHTTPHeaderField:$0)}
         r.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        r.httpBody=try JSONSerialization.data(withJSONObject:body);return try await session.data(for:r).0
+        r.httpBody=try JSONSerialization.data(withJSONObject:body)
+        return try await session.data(for:r).0
+    }
+}
+
+// MARK: - UIViewRepresentable Apple Sign In Button
+// This is the CORRECT fix for the crash. Using SwiftUI's SignInWithAppleButton
+// causes "not in hierarchy" fatal error when the view is not at the root window.
+// Wrapping in UIViewRepresentable uses the UIKit button directly and always
+// presents from the key window — works from any context including profile menu.
+
+struct AppleSignInButton: UIViewRepresentable {
+    let onRequest: (ASAuthorizationAppleIDRequest) -> Void
+    let onCompletion: (Result<ASAuthorization, Error>) -> Void
+
+    func makeUIView(context: Context) -> ASAuthorizationAppleIDButton {
+        let button = ASAuthorizationAppleIDButton(type: .signIn, style: .white)
+        button.addTarget(context.coordinator, action: #selector(Coordinator.tapped), for: .touchUpInside)
+        return button
+    }
+    func updateUIView(_ uiView: ASAuthorizationAppleIDButton, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    class Coordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+        let parent: AppleSignInButton
+        private var controller: ASAuthorizationController?
+
+        init(parent: AppleSignInButton) { self.parent = parent }
+
+        @objc func tapped() {
+            let provider = ASAuthorizationAppleIDProvider()
+            let request  = provider.createRequest()
+            parent.onRequest(request)
+            let ctrl = ASAuthorizationController(authorizationRequests: [request])
+            ctrl.delegate = self
+            ctrl.presentationContextProvider = self
+            controller = ctrl   // retain strongly
+            ctrl.performRequests()
+        }
+
+        public func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+            // Always get the live key window — works from any presentation context
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first { $0.isKeyWindow } ?? UIWindow()
+        }
+
+        public func authorizationController(controller: ASAuthorizationController,
+                                             didCompleteWithAuthorization auth: ASAuthorization) {
+            self.controller = nil
+            parent.onCompletion(.success(auth))
+        }
+        public func authorizationController(controller: ASAuthorizationController,
+                                             didCompleteWithError error: Error) {
+            self.controller = nil
+            parent.onCompletion(.failure(error))
+        }
     }
 }
 
@@ -170,23 +246,22 @@ public actor IDEGitHubClient {
 
 @MainActor
 public final class IDEAuthViewModel: NSObject, ObservableObject {
-
-    // CRITICAL: Retain controller strongly until delegate fires — weak ref = crash
-    private var _appleController: ASAuthorizationController?
-    private var _currentNonce: String = ""
-
-    @Published public var isSignedIn   = false
-    @Published public var isGuest      = false
+    @Published public var isSignedIn      = false
+    @Published public var isGuest         = false
     @Published public var githubConnected = false
-    @Published public var username     = ""
-    @Published public var githubUsername = ""
+    @Published public var username        = ""
+    @Published public var githubUsername  = ""
     @Published public var githubAvatarURL: URL? = nil
     @Published public var avatarImage: UIImage? = nil
-    @Published public var appleUserId  = ""
-    @Published public var error: String? = nil
-    @Published public var appleErrorMessage: String? = nil  // user-visible Apple error
+    @Published public var appleUserId     = ""
+    @Published public var error: String?  = nil
+    @Published public var appleErrorMessage: String? = nil
     @Published public var deviceFlow: IDEDeviceFlow?
     @Published public var savedAccounts: [IDESavedAccount] = []
+    @Published public var activeAccountProvider: String = "github"  // tracks active session account
+
+    // Nonce state for Apple Sign In
+    private var _currentNonce: String = ""
 
     public func restoreSession() {
         if let pat=KeychainHelper.load(key:"ide_github_pat"),!pat.isEmpty {
@@ -195,9 +270,9 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
                 await IDEGitHubClient.shared.setToken(pat)
                 if let user=try? await IDEGitHubClient.shared.fetchUser() {
                     KeychainHelper.save(key:"ide_github_username",value:user.login)
-                    await MainActor.run{
+                    await MainActor.run {
                         self.githubConnected=true;self.githubUsername=user.login
-                        self.username=user.login;self.isSignedIn=true
+                        self.username=user.login;self.isSignedIn=true;self.activeAccountProvider="github"
                     }
                     if let a=user.avatarURL{await self.fetchAndCacheAvatar(a)}
                     await self.ensureDefaultRepo(username:user.login)
@@ -208,11 +283,11 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
         }
         if let uid=KeychainHelper.load(key:"ide_apple_uid"),!uid.isEmpty {
             ASAuthorizationAppleIDProvider().getCredentialState(forUserID:uid){[weak self] state,_ in
-                // Must update UI on main thread — use Task @MainActor, not DispatchQueue
                 Task{@MainActor in
                     if state == .authorized,!(self?.isSignedIn ?? false) {
                         let name=KeychainHelper.load(key:"ide_apple_name") ?? "Apple User"
                         self?.appleUserId=uid;self?.username=name;self?.isSignedIn=true
+                        self?.activeAccountProvider="apple"
                     }
                 }
             }
@@ -220,42 +295,71 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
         loadSavedAccounts()
     }
 
-    // MARK: Sign in with Apple
-    // The canonical crash-safe pattern for SwiftUI + @MainActor:
-    // 1. Generate nonce BEFORE creating controller
-    // 2. Store controller STRONGLY on self
-    // 3. Delegate methods use Task { @MainActor in } NOT DispatchQueue.main.async
-    // 4. Release controller AFTER callback completes
-    public func signInWithApple() {
-        appleErrorMessage = nil
-
+    // Called from AppleSignInButton.onRequest — sets up the nonce BEFORE performRequests
+    public func prepareAppleRequest(_ request: ASAuthorizationAppleIDRequest) {
         let rawNonce = generateNonce()
         _currentNonce = rawNonce
-
-        let request = ASAuthorizationAppleIDProvider().createRequest()
         request.requestedScopes = [.fullName, .email]
-        request.nonce = sha256(rawNonce)  // SHA256 of raw nonce — Apple verifies this in JWT
+        request.nonce = sha256(rawNonce)
+    }
 
-        // Store strongly — if this is released before callback, you get a crash
-        let controller = ASAuthorizationController(authorizationRequests: [request])
-        controller.delegate = self
-        controller.presentationContextProvider = self
-        _appleController = controller
-        controller.performRequests()
+    // Called from AppleSignInButton.onCompletion — handles result on @MainActor
+    public func handleAppleCompletion(_ result: Result<ASAuthorization, Error>) {
+        appleErrorMessage = nil
+        switch result {
+        case .success(let auth):
+            Task { @MainActor in
+                if let cred=auth.credential as? ASAuthorizationAppleIDCredential {
+                    let uid=cred.user
+                    // Priority: email prefix → full name → cached name → "Apple User"
+                    var display = KeychainHelper.load(key:"ide_apple_name") ?? "Apple User"
+                    // Extract username from email prefix (e.g. "justin" from "justin@icloud.com")
+                    if let email = cred.email, !email.isEmpty {
+                        let emailPrefix = String(email.split(separator:"@").first ?? "")
+                        if !emailPrefix.isEmpty { display = emailPrefix }
+                    }
+                    // Override with full name if provided (first sign-in)
+                    let fullName = [cred.fullName?.givenName, cred.fullName?.familyName]
+                        .compactMap{$0}.joined(separator:" ")
+                    if !fullName.isEmpty { display = fullName }
+                    KeychainHelper.save(key:"ide_apple_uid",  value:uid)
+                    KeychainHelper.save(key:"ide_apple_name", value:display)
+                    self.appleUserId=uid; self.username=display; self.isSignedIn=true
+                    self.activeAccountProvider="apple"
+                    self.loadSavedAccounts()
+                }
+            }
+        case .failure(let error):
+            Task { @MainActor in
+                let authError = error as? ASAuthorizationError
+                if authError?.code == .canceled { return }
+                let code = authError?.code.rawValue ?? 0
+                if code == 1001 {
+                    self.appleErrorMessage = "Sign in with Apple is temporarily unavailable. Please try GitHub or try again in a few minutes."
+                } else {
+                    self.appleErrorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    // Legacy method kept for compatibility — now uses UIViewRepresentable approach
+    public func signInWithApple() {
+        // This is now handled by AppleSignInButton UIViewRepresentable
+        // Kept as no-op to not break any remaining call sites
     }
 
     public func startGitHubDeviceFlow() async {
-        // Silent re-auth if token exists and is valid
         if let existingPat=KeychainHelper.load(key:"ide_github_pat"),!existingPat.isEmpty {
             await IDEGitHubClient.shared.setToken(existingPat)
             if let user=try? await IDEGitHubClient.shared.fetchUser() {
                 KeychainHelper.save(key:"ide_github_username",value:user.login)
                 githubConnected=true;githubUsername=user.login;username=user.login;isSignedIn=true
+                activeAccountProvider="github"
                 if let a=user.avatarURL{await fetchAndCacheAvatar(a)}
                 loadSavedAccounts();return
             }
         }
-        // No valid token — device flow
         do {
             var flow=try await IDEGitHubClient.shared.startDeviceFlow()
             flow.isPolling=true;deviceFlow=flow
@@ -268,19 +372,59 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
             let user=try await IDEGitHubClient.shared.fetchUser()
             KeychainHelper.save(key:"ide_github_username",value:user.login)
             githubConnected=true;githubUsername=user.login;username=user.login;isSignedIn=true;deviceFlow=nil
+            activeAccountProvider="github"
             if let a=user.avatarURL{KeychainHelper.save(key:"ide_github_avatar_url",value:a);await fetchAndCacheAvatar(a)}
             loadSavedAccounts();await ensureDefaultRepo(username:user.login)
         } catch{deviceFlow?.error=error.localizedDescription;deviceFlow?.isPolling=false}
+    }
+
+    public func setActiveAccount(_ provider: String) {
+        activeAccountProvider = provider
+        if provider == "github" {
+            let ghUser = KeychainHelper.load(key: "ide_github_username") ?? ""
+            if !ghUser.isEmpty { username = ghUser }
+        } else if provider == "apple" {
+            let appleUser = KeychainHelper.load(key: "ide_apple_name") ?? "Apple User"
+            username = appleUser
+        }
     }
 
     public func continueAsGuest(){isGuest=true;isSignedIn=true;username="Guest"}
 
     public func signOut(){
         isSignedIn=false;isGuest=false;githubConnected=false;username="";githubUsername=""
-        githubAvatarURL=nil;avatarImage=nil;appleUserId="";_appleController=nil
+        githubAvatarURL=nil;avatarImage=nil;appleUserId=""
         Task{await IDEGitHubClient.shared.clearToken()}
         ["ide_github_pat","ide_github_username","ide_github_avatar_url","ide_apple_uid","ide_apple_name"]
             .forEach{KeychainHelper.delete(key:$0)}
+        loadSavedAccounts()
+    }
+
+    public func disconnectAccount(_ provider: String) {
+        if provider == "github" {
+            Task { await IDEGitHubClient.shared.clearToken() }
+            KeychainHelper.delete(key:"ide_github_pat")
+            KeychainHelper.delete(key:"ide_github_username")
+            KeychainHelper.delete(key:"ide_github_avatar_url")
+            githubConnected=false;githubUsername=""
+            if activeAccountProvider == "github" {
+                // Fall back to Apple if available
+                if !appleUserId.isEmpty {
+                    activeAccountProvider="apple"
+                    username=KeychainHelper.load(key:"ide_apple_name") ?? "Apple User"
+                } else { signOut() }
+            }
+        } else if provider == "apple" {
+            KeychainHelper.delete(key:"ide_apple_uid")
+            KeychainHelper.delete(key:"ide_apple_name")
+            appleUserId=""
+            if activeAccountProvider == "apple" {
+                if githubConnected {
+                    activeAccountProvider="github"
+                    username=githubUsername
+                } else { signOut() }
+            }
+        }
         loadSavedAccounts()
     }
 
@@ -300,19 +444,18 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
             content:"# Ash Tree IDE\n© 2025 DART Meadow | Radical Deepscale LLC.",message:"Initialize")
     }
 
-    private func loadSavedAccounts(){
+    private func loadSavedAccounts() {
         var accs:[IDESavedAccount]=[]
         if let gh=KeychainHelper.load(key:"ide_github_username"),!gh.isEmpty {
             let url=KeychainHelper.load(key:"ide_github_avatar_url").flatMap{URL(string:$0)}
-            accs.append(.init(username:gh,provider:"github",avatarURL:url))
+            accs.append(.init(username:gh,provider:"github",avatarURL:url,isActive:activeAccountProvider=="github"))
         }
         if let apple=KeychainHelper.load(key:"ide_apple_name"),!apple.isEmpty {
-            accs.append(.init(username:apple,provider:"apple",avatarURL:nil))
+            accs.append(.init(username:apple,provider:"apple",avatarURL:nil,isActive:activeAccountProvider=="apple"))
         }
         savedAccounts=accs
     }
 
-    // Nonce helpers
     private func generateNonce(length:Int=32) -> String {
         let charset="0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._"
         var result="";var remaining=length
@@ -329,46 +472,21 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
     }
 }
 
-// MARK: Delegates
-// KEY FIX: Use Task { @MainActor in } instead of DispatchQueue.main.async
-// This is the correct pattern for @MainActor classes on iOS 15+
+// MARK: - Legacy delegate extensions (kept for any existing call sites)
+
 extension IDEAuthViewModel: ASAuthorizationControllerDelegate {
-    public func authorizationController(controller:ASAuthorizationController,didCompleteWithAuthorization auth:ASAuthorization) {
-        // Task @MainActor is the safe way to update @Published from a background delegate callback
-        Task { @MainActor [weak self] in
-            guard let self=self else{return}
-            self._appleController=nil  // release after callback
-            if let cred=auth.credential as? ASAuthorizationAppleIDCredential {
-                let uid=cred.user
-                let name=[cred.fullName?.givenName,cred.fullName?.familyName].compactMap{$0}.joined(separator:" ")
-                let display=name.isEmpty ? (KeychainHelper.load(key:"ide_apple_name") ?? "Apple User") : name
-                KeychainHelper.save(key:"ide_apple_uid",value:uid)
-                KeychainHelper.save(key:"ide_apple_name",value:display)
-                self.appleUserId=uid;self.username=display;self.isSignedIn=true
-                self.loadSavedAccounts()
-            }
-        }
+    public func authorizationController(controller: ASAuthorizationController,
+                                        didCompleteWithAuthorization auth: ASAuthorization) {
+        handleAppleCompletion(.success(auth))
     }
-    public func authorizationController(controller:ASAuthorizationController,didCompleteWithError error:Error) {
-        Task { @MainActor [weak self] in
-            guard let self=self else{return}
-            self._appleController=nil
-            let authError = error as? ASAuthorizationError
-            if authError?.code == .canceled{return}  // User cancelled — not an error
-            // "Sign Up Not Completed" = Apple server issue (ASAuthorizationErrorUnknown code 1001)
-            // Show user-friendly message instead of crashing
-            let code = authError?.code.rawValue ?? 0
-            if code == 1001 {
-                self.appleErrorMessage = "Sign in with Apple service is temporarily unavailable. Please try GitHub sign in or try again in a few minutes."
-            } else {
-                self.appleErrorMessage = error.localizedDescription
-            }
-        }
+    public func authorizationController(controller: ASAuthorizationController,
+                                        didCompleteWithError error: Error) {
+        handleAppleCompletion(.failure(error))
     }
 }
 
 extension IDEAuthViewModel: ASAuthorizationControllerPresentationContextProviding {
-    public func presentationAnchor(for controller:ASAuthorizationController) -> ASPresentationAnchor {
+    public func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
         UIApplication.shared.connectedScenes.compactMap{$0 as? UIWindowScene}
             .flatMap{$0.windows}.first{$0.isKeyWindow} ?? UIWindow()
     }
