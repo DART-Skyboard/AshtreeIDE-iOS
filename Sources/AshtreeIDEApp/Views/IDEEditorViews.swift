@@ -844,6 +844,37 @@ struct IDEDocsView: View {
                                "\n[net:...]      — Network syntax (log-iterative mode)")
 
                 DocBlock(title: "ORDER OF OPERATIONS (25)",
-    content: "Natural Tools (1–7):\nMaze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors\n\nMath/Physics (8–19):\nParentheses · Exponents · Multiplication · Division · Addition · Subtraction · Logarithm · Trigonometry · Temperature · Velocity · Pressure · Mass · Photosynthesis\n\nSenses / AI (20–25):\nTouch · Taste · Vision · Smell · Hearing · Proprioception\n\nBRPN — Buoyancy Reflex Pendulum Node:\nAerospace Shell · Maritime Shell · Geological Shell")
-                    )
-                    
+                         content: "Natural Tools (1-7):\nMaze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors\n\nMath/Physics (8-19):\nParentheses · Exponents · Multiplication · Division · Addition · Subtraction · Logarithm · Trigonometry · Temperature · Velocity · Pressure · Mass · Photosynthesis\n\nSenses / AI (20-25):\nTouch · Taste · Vision · Smell · Hearing · Proprioception\n\nBRPN — Buoyancy Reflex Pendulum Node:\nAerospace Shell · Maritime Shell · Geological Shell")
+
+            }  // end VStack in ScrollView
+            .padding(16)
+        }  // end ScrollView inside ZStack
+        }  // end ZStack
+        .background(themeVM.bg)
+    }  // end body
+}  // end IDEDocsView
+
+// MARK: - DocBlock helper
+
+struct DocBlock: View {
+    let title: String
+    let content: String
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex: "#4a5568")).kerning(2)
+            Text(content)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Color(hex: "#c9d1d9"))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+                .background(Color(hex: "#0d1117"))
+                .cornerRadius(6)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: "#21262d"), lineWidth: 0.5))
+        }
+    }
+}
+
