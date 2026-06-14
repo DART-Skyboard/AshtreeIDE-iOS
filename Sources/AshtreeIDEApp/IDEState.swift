@@ -139,7 +139,29 @@ public final class IDEState: ObservableObject {
         UserDefaults.standard.set(sourceCode, forKey: key)
         if !localFiles.contains(currentFile) { localFiles.append(currentFile) }
         UserDefaults.standard.set(localFiles, forKey: "ide_local_file_list")
+        UserDefaults.standard.synchronize()  // force immediate write
         isDirty = false
+        // Reload to confirm persistence
+        loadLocalFiles()
+    }
+
+    /// Delete a local file
+    public func deleteLocalFile(_ name: String) {
+        UserDefaults.standard.removeObject(forKey: "ide_local_\(name)")
+        localFiles.removeAll { $0 == name }
+        UserDefaults.standard.set(localFiles, forKey: "ide_local_file_list")
+        UserDefaults.standard.synchronize()
+    }
+
+    /// New file name dialog helper
+    public func renameCurrentFile(to name: String) {
+        let trimmed = name.hasSuffix(".ash") ? name : name + ".ash"
+        // If saving a new file under new name, delete old placeholder
+        if currentFile == "untitled.ash" || currentFile.isEmpty {
+            currentFile = trimmed
+        } else {
+            currentFile = trimmed
+        }
     }
 
     public func loadLocalFiles() {
