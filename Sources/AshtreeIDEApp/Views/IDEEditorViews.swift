@@ -350,9 +350,11 @@ struct IDECompilerOutputView: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
     @EnvironmentObject var mazeVM:  MazeViewModel
+    @State private var glPanelKey = UUID()  // forces GL panel to rebuild on each compile
 
     var hasGLOutput: Bool {
         ideVM.sourceCode.contains("import (GLDrivers)") || ideVM.sourceCode.contains("gl.scene")
+            || ideVM.sourceCode.contains("ArcEdge") || ideVM.sourceCode.contains("ArcVector")
     }
 
     var body: some View {
@@ -365,6 +367,7 @@ struct IDECompilerOutputView: View {
                 Divider().background(themeVM.accent.opacity(0.3))
 
                 IDEGLOutputPanel()
+                    .id(ideVM.compiler.compilerLines.count)
                     .frame(maxHeight: .infinity)
             } else {
                 IDECompilerTextPanel()
@@ -443,18 +446,17 @@ struct IDEGLOutputPanel: View {
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundColor(Color(hex: "#00e5ff")).kerning(2)
                 Spacer()
-                Button {
-                    Task { await buildGLScene() }
-                } label: {
-                    HStack(spacing: 4) {
-                        if isRendering { ProgressView().scaleEffect(0.6).tint(Color(hex: "#00e5ff")) }
-                        Text(isRendering ? "Rendering…" : "▸ Render 3D")
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundColor(Color(hex: "#00e5ff"))
+                if isRendering {
+                    ProgressView().scaleEffect(0.7).tint(Color(hex: "#00e5ff"))
+                        .padding(.horizontal, 10)
+                } else if showArcEdge || glScene != nil {
+                    Button("↺ Reset") {
+                        showArcEdge = false; glScene = nil
+                        Task { await buildGLScene() }
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Color(hex: "#00e5ff").opacity(0.1))
-                    .cornerRadius(6)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#00e5ff"))
+                    .padding(.horizontal, 10)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -539,6 +541,11 @@ struct IDEGLOutputPanel: View {
         try? await Task.sleep(nanoseconds: 300_000_000)
         glScene = root
         isRendering = false
+    }
+
+    // Called from IDECompilerOutputView after each compile — auto-triggers GL render
+    func onCompileComplete() {
+        Task { await buildGLScene() }
     }
 }
 
