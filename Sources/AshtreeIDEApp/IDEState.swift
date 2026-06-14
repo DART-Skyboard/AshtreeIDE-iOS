@@ -23,6 +23,7 @@ public final class IDEState: ObservableObject {
     @Published public var sourceCode = IDEDefaults.defaultScript
     @Published public var currentFile = "untitled.ash"
     @Published public var isDirty = false
+    @Published public var exportFileToDevice = false
     @Published public var selectedTab: IDETab = .editor
     @Published public var isCompiling = false
     @Published public var isSaving = false
@@ -436,4 +437,25 @@ import (GLDrivers)
 }|';\'|
 """
 
+}
+
+// MARK: - AshDocument for fileExporter
+import UniformTypeIdentifiers
+
+struct AshDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var content: String
+    var filename: String
+
+    init(content: String, filename: String) {
+        self.content = content
+        self.filename = filename
+    }
+    init(configuration: ReadConfiguration) throws {
+        content = (try? String(data: configuration.file.regularFileContents ?? Data(), encoding: .utf8)) ?? ""
+        filename = "untitled.ash"
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(content.utf8))
+    }
 }
