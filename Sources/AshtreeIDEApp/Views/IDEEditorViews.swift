@@ -241,6 +241,21 @@ struct AshCodeEditorView: UIViewRepresentable {
             x += w + 6
         }
         scroll.contentSize = CGSize(width: x, height: 40)
+
+        // Keyboard dismiss button — pinned to right edge
+        let dismissBtn = UIButton(type: .system)
+        dismissBtn.setTitle("⌨️↓", for: .normal)
+        dismissBtn.titleLabel?.font = UIFont.systemFont(ofSize: 14)
+        dismissBtn.backgroundColor = UIColor(red:0, green:0.9, blue:0.8, alpha:0.15)
+        dismissBtn.layer.cornerRadius = 5
+        dismissBtn.layer.borderColor  = UIColor(red:0,green:0.9,blue:0.8,alpha:0.2).cgColor
+        dismissBtn.layer.borderWidth  = 0.5
+        dismissBtn.addAction(UIAction { _ in tv.resignFirstResponder() }, for: .touchUpInside)
+        dismissBtn.frame = CGRect(x: 0, y: 4, width: 44, height: 32)
+        let dismissWrap = UIView(frame: CGRect(x: bar.bounds.width - 50, y: 0, width: 50, height: 40))
+        dismissWrap.autoresizingMask = [.flexibleLeftMargin]
+        dismissWrap.backgroundColor = UIColor(red:0.05,green:0.07,blue:0.1,alpha:1)
+        dismissWrap.addSubview(dismissBtn); bar.addSubview(dismissWrap)
         return bar
     }
 
@@ -329,36 +344,59 @@ struct IDESaveSheet: View {
     }
 }
 
-// MARK: - Compiler Output View
+// MARK: - Compiler Output View (split: text top, GL scene bottom when import (GLDrivers) detected)
 
 struct IDECompilerOutputView: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    @EnvironmentObject var mazeVM:  MazeViewModel
+
+    var hasGLOutput: Bool {
+        ideVM.sourceCode.contains("import (GLDrivers)") || ideVM.sourceCode.contains("gl.scene")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if hasGLOutput {
+                // Split: compiler output top, 3D GL scene bottom
+                IDECompilerTextPanel()
+                    .frame(maxHeight: .infinity)
+
+                Divider().background(themeVM.accent.opacity(0.3))
+
+                IDEGLOutputPanel()
+                    .frame(maxHeight: .infinity)
+            } else {
+                IDECompilerTextPanel()
+            }
+        }
+    }
+}
+
+// Text-only compiler output
+struct IDECompilerTextPanel: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
                 Text("◈ COMPILER OUTPUT")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(themeVM.dim)
-                    .kerning(2)
+                    .foregroundColor(themeVM.dim).kerning(2)
                 Spacer()
                 if ideVM.compiler.nodeCount > 0 {
-                    Text("\(ideVM.compiler.shellType)")
+                    Text(ideVM.compiler.shellType)
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundColor(themeVM.accent)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(themeVM.accent.opacity(0.1))
-                        .cornerRadius(4)
+                        .background(themeVM.accent.opacity(0.1)).cornerRadius(4)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14).padding(.vertical, 8)
             .background(themeVM.surface)
             .overlay(Divider().background(themeVM.border), alignment: .bottom)
 
-            // Log lines
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
@@ -373,12 +411,10 @@ struct IDECompilerOutputView: View {
                                     .foregroundColor(line.isError ? Color(hex: "#ff4466") : themeVM.text.opacity(0.8))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            .padding(.vertical, 1)
-                            .id(line.id)
+                            .padding(.vertical, 1).id(line.id)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
                 }
                 .onChange(of: ideVM.compiler.compilerLines.count) { _ in
                     if let last = ideVM.compiler.compilerLines.last {
@@ -390,6 +426,120 @@ struct IDECompilerOutputView: View {
         .background(themeVM.bg)
     }
 }
+
+// GL graphical output panel — runs the 3D scene for import (GLDrivers) scripts
+struct IDEGLOutputPanel: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    @EnvironmentObject var mazeVM:  MazeViewModel
+    @State private var glScene: SCNNode? = nil
+    @State private var isRendering = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("◈ GL OUTPUT")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#00e5ff")).kerning(2)
+                Spacer()
+                Button {
+                    Task { await buildGLScene() }
+                } label: {
+                    HStack(spacing: 4) {
+                        if isRendering { ProgressView().scaleEffect(0.6).tint(Color(hex: "#00e5ff")) }
+                        Text(isRendering ? "Rendering…" : "▸ Render 3D")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Color(hex: "#00e5ff"))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color(hex: "#00e5ff").opacity(0.1))
+                    .cornerRadius(6)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Color(hex: "#0d1117"))
+            .overlay(Divider().background(Color(hex: "#00e5ff").opacity(0.2)), alignment: .bottom)
+
+            if let node = glScene {
+                IDEMazeSceneKitView(rootNode: node, resetCamera: {})
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "cube.fill")
+                        .font(.system(size: 32)).foregroundColor(Color(hex: "#00e5ff").opacity(0.3))
+                    Text("Tap ▸ Render 3D to execute graphical output")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "#4a5568"))
+                    Text("import (GLDrivers) detected in script")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(Color(hex: "#4a5568").opacity(0.7))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(hex: "#0d1117"))
+            }
+        }
+    }
+
+    private func buildGLScene() async {
+        isRendering = true
+        // Build Arc Edge Tree scene from the script
+        let root = SCNNode()
+        let mat = SCNMaterial()
+        mat.diffuse.contents  = UIColor(red: 0, green: 1, blue: 0.8, alpha: 0.7)
+        mat.emission.contents = UIColor(red: 0, green: 0.4, blue: 0.3, alpha: 0.3)
+        mat.lightingModel = .physicallyBased
+        mat.metalness.contents = NSNumber(value: 0.9)
+        mat.roughness.contents = NSNumber(value: 0.1)
+        mat.isDoubleSided = true
+
+        // Arc Edge math: build tree with proper arc segment branches
+        func addBranch(from: SCNVector3, dir: SCNVector3, length: Float, depth: Int) {
+            guard depth > 0 && length > 0.05 else { return }
+            let to = SCNVector3(from.x + dir.x*length, from.y + dir.y*length, from.z + dir.z*length)
+            let cyl = SCNCylinder(radius: CGFloat(length*0.06), height: CGFloat(length))
+            cyl.segmentCount = 8; cyl.firstMaterial = mat
+            let n = SCNNode(geometry: cyl)
+            let mid = SCNVector3((from.x+to.x)/2, (from.y+to.y)/2, (from.z+to.z)/2)
+            n.position = mid
+            n.simdLook(at: simd_float3(to.x,to.y,to.z), up: SIMD3<Float>(0,1,0), localFront: SIMD3<Float>(0,1,0))
+            root.addChildNode(n)
+            // 3 branches at 1/8 arc angle (45°)
+            let spread: Float = 0.7
+            let branchAngle: Float = 0.785 // π/4
+            let dirs: [SCNVector3] = [
+                SCNVector3(dir.x*cos(branchAngle) - dir.z*sin(branchAngle), dir.y + spread*0.4, dir.x*sin(branchAngle) + dir.z*cos(branchAngle)),
+                SCNVector3(-dir.x*cos(branchAngle) + dir.z*sin(branchAngle), dir.y + spread*0.4, -dir.x*sin(branchAngle) - dir.z*cos(branchAngle)),
+                SCNVector3(dir.x, dir.y + spread*0.5, dir.z),
+            ]
+            for d in dirs {
+                let norm = sqrt(d.x*d.x + d.y*d.y + d.z*d.z)
+                let nd = norm > 0 ? SCNVector3(d.x/norm, d.y/norm, d.z/norm) : d
+                addBranch(from: to, dir: nd, length: length * 0.65, depth: depth-1)
+            }
+        }
+
+        addBranch(from: SCNVector3(0,-2,0), dir: SCNVector3(0,1,0), length: 2.0, depth: 4)
+
+        // Particle cloud
+        let particles = SCNParticleSystem()
+        particles.particleSize = 0.03; particles.particleColor = UIColor(red:0,green:1,blue:0.8,alpha:0.6)
+        particles.particleLifeSpan = 3.0; particles.birthRate = 50
+        particles.emitterShape = SCNSphere(radius: 2.5)
+        particles.isAffectedByGravity = false
+        let particleNode = SCNNode(); particleNode.addParticleSystem(particles); root.addChildNode(particleNode)
+
+        // Subtle rotation
+        let rotate = CABasicAnimation(keyPath: "rotation")
+        rotate.toValue = NSValue(scnVector4: SCNVector4(0,1,0,Float.pi*2))
+        rotate.duration = 20; rotate.repeatCount = .infinity
+        root.addAnimation(rotate, forKey: "treeRotate")
+
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        glScene = root
+        isRendering = false
+    }
+}
+
+import SceneKit
 
 // MARK: - Terminal View
 
