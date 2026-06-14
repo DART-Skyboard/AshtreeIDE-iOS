@@ -258,9 +258,13 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
     @Published public var appleErrorMessage: String? = nil
     @Published public var deviceFlow: IDEDeviceFlow?
     @Published public var savedAccounts: [IDESavedAccount] = []
-    @Published public var activeAccountProvider: String = "github"  // tracks active session account
+    @Published public var activeAccountProvider: String = "github"
+    // Editable app username (separate from connected account names)
+    @Published public var appUsername: String = ""
+    // Per-provider: use that provider's username as app display name
+    @Published public var useGitHubName: Bool = false
+    @Published public var useAppleName:  Bool = false
 
-    // Nonce state for Apple Sign In
     private var _currentNonce: String = ""
 
     public func restoreSession() {
@@ -292,7 +296,12 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
                 }
             }
         }
+        // Restore custom app username
+        if let custom = KeychainHelper.load(key: "ide_app_username"), !custom.isEmpty {
+            appUsername = custom
+        }
         loadSavedAccounts()
+        updateDisplayUsername()
     }
 
     // Called from AppleSignInButton.onRequest — sets up the nonce BEFORE performRequests
@@ -396,18 +405,52 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
     }
 
     public func setActiveAccount(_ provider: String) {
-        // SWITCH active session — never disconnects the other account
+        // SWITCH active session — never disconnects anything
         activeAccountProvider = provider
+        updateDisplayUsername()
+        loadSavedAccounts()
+    }
+
+    // Whether the provider's account name is used as app display name
+    public func useAccountName(provider: String) -> Bool {
+        provider == "github" ? useGitHubName : useAppleName
+    }
+
+    // Toggle: use provider account name for app display
+    public func setUseAccountName(_ on: Bool, provider: String) {
         if provider == "github" {
-            let ghUser = KeychainHelper.load(key: "ide_github_username") ?? ""
-            if !ghUser.isEmpty { username = ghUser }
-        } else if provider == "apple" {
-            // Prefer email prefix, fall back to stored name
+            useGitHubName = on
+        } else {
+            useAppleName = on
+        }
+        updateDisplayUsername()
+    }
+
+    // Derive what the app should display as username
+    public func updateDisplayUsername() {
+        // Priority: toggled account name > custom appUsername > active account's stored name
+        if activeAccountProvider == "github" && useGitHubName {
+            let gh = KeychainHelper.load(key: "ide_github_username") ?? ""
+            if !gh.isEmpty { username = gh; return }
+        }
+        if activeAccountProvider == "apple" && useAppleName {
+            let prefix = KeychainHelper.load(key: "ide_apple_email_prefix") ?? ""
+            let name   = KeychainHelper.load(key: "ide_apple_name") ?? ""
+            let n = prefix.isEmpty ? name : prefix
+            if !n.isEmpty { username = n; return }
+        }
+        // Custom app username
+        if let custom = KeychainHelper.load(key: "ide_app_username"), !custom.isEmpty {
+            username = custom; appUsername = custom; return
+        }
+        // Fall back to active account stored name
+        if activeAccountProvider == "github" {
+            username = KeychainHelper.load(key: "ide_github_username") ?? ""
+        } else if activeAccountProvider == "apple" {
             let prefix = KeychainHelper.load(key: "ide_apple_email_prefix") ?? ""
             let name   = KeychainHelper.load(key: "ide_apple_name") ?? "Apple User"
             username = prefix.isEmpty ? name : prefix
         }
-        loadSavedAccounts()  // refresh isActive flags
     }
 
     public func continueAsGuest(){isGuest=true;isSignedIn=true;username="Guest"}
