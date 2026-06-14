@@ -587,56 +587,126 @@ struct IDEDrawerSettingsTab: View {
 struct IDEDrawerProfileTab: View {
     @EnvironmentObject var authVM:  IDEAuthViewModel
     @EnvironmentObject var themeVM: IDEThemeViewModel
+    @State private var editingUsername = false
+    @State private var draftUsername   = ""
 
     var body: some View {
         List {
+            // ── App Username (editable) ──────────────────────────
             Section {
-                LabeledContent("Username", value: authVM.username).foregroundColor(themeVM.text)
-                if authVM.githubConnected {
-                    LabeledContent("GitHub", value: "@\(authVM.githubUsername)").foregroundColor(themeVM.text)
-                }
-                if !authVM.appleUserId.isEmpty {
-                    LabeledContent("Apple ID", value: "Signed in").foregroundColor(themeVM.text)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("App Username")
+                            .font(.system(size: 10)).foregroundColor(themeVM.dim)
+                        if editingUsername {
+                            TextField("Username", text: $draftUsername)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(themeVM.accent)
+                                .onSubmit {
+                                    let trimmed = draftUsername.trimmingCharacters(in: .whitespaces)
+                                    if !trimmed.isEmpty {
+                                        authVM.appUsername = trimmed
+                                        KeychainHelper.save(key: "ide_app_username", value: trimmed)
+                                        authVM.username = trimmed
+                                    }
+                                    editingUsername = false
+                                }
+                                .autocorrectionDisabled()
+                                .autocapitalization(.none)
+                        } else {
+                            Text(authVM.appUsername.isEmpty ? authVM.username : authVM.appUsername)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(themeVM.text)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        if editingUsername {
+                            let trimmed = draftUsername.trimmingCharacters(in: .whitespaces)
+                            if !trimmed.isEmpty {
+                                authVM.appUsername = trimmed
+                                KeychainHelper.save(key: "ide_app_username", value: trimmed)
+                                authVM.username = trimmed
+                            }
+                            editingUsername = false
+                        } else {
+                            draftUsername   = authVM.appUsername.isEmpty ? authVM.username : authVM.appUsername
+                            editingUsername = true
+                        }
+                    } label: {
+                        Text(editingUsername ? "Save" : "Edit")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(themeVM.accent)
+                    }
                 }
             } header: {
                 Text("ACCOUNT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
             }
 
+            // ── Connected Accounts ───────────────────────────────
+            // Tap the row → switch active account
+            // Tap the red ✕ → disconnect that account only
             Section("CONNECTED ACCOUNTS") {
                 ForEach(authVM.savedAccounts) { acc in
-                    HStack {
-                        // Active indicator
-                        Image(systemName: acc.isActive ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 12))
-                            .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
-                        Image(systemName: acc.provider == "github" ? "chevron.left.forwardslash.chevron.right" : "apple.logo")
-                            .font(.system(size: 11)).foregroundColor(themeVM.accent)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(acc.username).font(.system(size: 12, weight: .medium)).foregroundColor(themeVM.text)
-                            Text(acc.isActive ? "Active session" : acc.provider.capitalized)
-                                .font(.system(size: 9))
-                                .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
-                        }
-                        Spacer()
-                        if !acc.isActive {
-                            // Switch active session to this account
-                            Button("Use") {
-                                authVM.setActiveAccount(acc.provider)
+                    Button {
+                        // Row tap = switch active account (never disconnects)
+                        authVM.setActiveAccount(acc.provider)
+                    } label: {
+                        HStack(spacing: 10) {
+                            // Active badge
+                            ZStack {
+                                Circle()
+                                    .fill(acc.isActive ? themeVM.accent : Color.clear)
+                                    .frame(width: 18, height: 18)
+                                Image(systemName: acc.isActive ? "checkmark" : "circle")
+                                    .font(.system(size: acc.isActive ? 9 : 12, weight: .bold))
+                                    .foregroundColor(acc.isActive ? .black : themeVM.dim)
                             }
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(themeVM.accent)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(themeVM.accent.opacity(0.12)).cornerRadius(4)
-                        }
-                        // Disconnect — only on explicit ✕ tap
-                        Button {
-                            authVM.disconnectAccount(acc.provider)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.red.opacity(0.7))
+
+                            // Provider icon
+                            Image(systemName: acc.provider == "github"
+                                ? "chevron.left.forwardslash.chevron.right" : "apple.logo")
+                                .font(.system(size: 13))
+                                .foregroundColor(themeVM.accent)
+
+                            // Account info
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(acc.username)
+                                    .font(.system(size: 13, weight: acc.isActive ? .semibold : .regular))
+                                    .foregroundColor(acc.isActive ? themeVM.accent : themeVM.text)
+                                Text(acc.isActive ? "Active session" : "Tap to switch")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
+                            }
+
+                            Spacer()
+
+                            // Use account name toggle
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("Use name")
+                                    .font(.system(size: 8)).foregroundColor(themeVM.dim)
+                                Toggle("", isOn: Binding(
+                                    get: { authVM.useAccountName(provider: acc.provider) },
+                                    set: { authVM.setUseAccountName($0, provider: acc.provider) }
+                                ))
+                                .labelsHidden()
+                                .tint(themeVM.accent)
+                                .scaleEffect(0.7)
+                            }
+
+                            // Red glowing disconnect button
+                            Button {
+                                authVM.disconnectAccount(acc.provider)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.red)
+                                    .shadow(color: .red.opacity(0.6), radius: 4, x: 0, y: 0)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -710,7 +780,9 @@ struct IDEDrawerAboutTab: View {
 
             Section {
                 LabeledContent("App", value: "Ash Tree IDE").foregroundColor(themeVM.text)
-                LabeledContent("Version", value: "1.0.0").foregroundColor(themeVM.text)
+                LabeledContent("Version",
+                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4.0")
+                    .foregroundColor(themeVM.text)
                 LabeledContent("Compiler", value: "LEATR v2").foregroundColor(themeVM.text)
                 LabeledContent("Author", value: "Justin Craig Venable").foregroundColor(themeVM.text)
                 LabeledContent("Company", value: "DART Meadow | Radical Deepscale LLC.").foregroundColor(themeVM.text)
