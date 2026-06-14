@@ -605,13 +605,13 @@ struct IDEDocsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DocBlock(title: "LEATR v2 COMPILER STANDARD",
-                         body: "Lead Edge Ash Tree Reflex · © 2025 DART Meadow | Radical Deepscale LLC." +
+                         content: "Lead Edge Ash Tree Reflex · © 2025 DART Meadow | Radical Deepscale LLC." +
                                "\nSwitch equations wrap every syntax pattern:" +
                                "\n  Encode (OPEN):  (xa²√xa) - 1" +
                                "\n  Decode (CLOSE): (xa²√xa) + 1")
 
                 DocBlock(title: "NODE STRUCTURE",
-                         body: "(NodeName):-: {" +
+                         content: "(NodeName):-: {" +
                                "\n  {{env:MyProject}}    // outer tag" +
                                "\n  [[owner:username]]   // inner tag" +
                                "\n  [poly: data-matrix]  // math" +
@@ -625,13 +625,13 @@ struct IDEDocsView: View {
                                "\n}|';\'|")
 
                 DocBlock(title: "TAG SYSTEM",
-                         body: "{{outer-tag}}  — Environment isolation shell" +
+                         content: "{{outer-tag}}  — Environment isolation shell" +
                                "\n[[inner-tag]]  — Script ownership (double-tagged)" +
                                "\n[poly:...]     — Polynomial/physics container" +
                                "\n[net:...]      — Network syntax (log-iterative mode)")
 
                 DocBlock(title: "ORDER OF OPERATIONS (19)",
-                         body: "Natural Tools (1-7):" +
+                         content: "Natural Tools (1-7):" +
                                "\nMaze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors" +
                                "\n\nMath/Physics (8-19):" +
                                "\nParentheses · Exponents · Multiplication · Division" +
@@ -641,7 +641,7 @@ struct IDEDocsView: View {
                                "\nTouch · Taste · Vision · Smell · Hear")
 
                 DocBlock(title: "BRPN — PENDULUM NODE",
-                         body: "After compile, shell routing via Buoyancy Reflex:" +
+                         content: "After compile, shell routing via Buoyancy Reflex:" +
                                "\n  f = formation  (1.0 if outer-tags present)" +
                                "\n  r = reflex     (1.0 if inner-tags present)" +
                                "\n  p = performance (nodeCount / 5, max 1.0)" +
@@ -650,7 +650,7 @@ struct IDEDocsView: View {
                                "\n\nShell: >=0.76 = GEOLOGICAL  >=0.44 = MARITIME  <0.44 = AEROSPACE")
 
                 DocBlock(title: "GL DRIVERS",
-                         body: "import (GLDrivers)  // Load 3D GL runtime" +
+                         content: "import (GLDrivers)  // Load 3D GL runtime" +
                                "\n\nNodes: ThreeScene · LightNode · ArcEdgeNode" +
                                "\n  CameraNode · ParticleNode · GeometryNode" +
                                "\n  MaterialNode · MeshNode · AnimateNode · UIOverlayNode" +
@@ -660,7 +660,7 @@ struct IDEDocsView: View {
                                "\n  Branch: 1/8-circle arc")
 
                 DocBlock(title: "KEYWORDS",
-                         body: "irin · irout · thenplace · place · placeto" +
+                         content: "irin · irout · thenplace · place · placeto" +
                                "\nResearch · Report · with · var · when · where" +
                                "\nand · or · not · for · else · is · if · end" +
                                "\nimport · return")
@@ -673,7 +673,7 @@ struct IDEDocsView: View {
 
 struct DocBlock: View {
     let title: String
-    let body: String
+    let content: String
     @EnvironmentObject var themeVM: IDEThemeViewModel
 
     var body: some View {
@@ -682,7 +682,7 @@ struct DocBlock: View {
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundColor(themeVM.dim)
                 .kerning(1.5)
-            Text(body)
+            Text(content)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(themeVM.text.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)
