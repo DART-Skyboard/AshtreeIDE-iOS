@@ -168,8 +168,6 @@ struct IDEMazeControlsPanel: View {
 
                     if showCrypto {
                         IDECryptologyView()
-                            .environmentObject(themeVM)
-                            .environmentObject(ideVM)
                             .frame(maxHeight: 700)
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
