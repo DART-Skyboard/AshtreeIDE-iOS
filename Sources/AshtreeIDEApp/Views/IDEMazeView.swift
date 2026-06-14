@@ -9,14 +9,17 @@ struct IDEMazeView: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var mazeVM:  MazeViewModel
     @State private var panelCollapsed = false
+    @State private var cryptoExpanded = false
 
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: 0) {
                 // ── Controls panel (collapsible) ──────────────────
                 if !panelCollapsed {
-                    IDEMazeControlsPanel(isCollapsed: $panelCollapsed)
-                        .frame(width: 220)
+                    IDEMazeControlsPanel(isCollapsed: $panelCollapsed, cryptoExpanded: $cryptoExpanded)
+                        .frame(width: min(geo.size.width - 44,
+                                         cryptoExpanded ? geo.size.width * 0.88 : 220))
+                        .animation(.spring(response:0.35,dampingFraction:0.85), value: cryptoExpanded)
                         .background(Color(hex: "#0d1117"))
                         .overlay(Divider().background(Color(hex: "#21262d")), alignment: .trailing)
                         .transition(.move(edge: .leading))
@@ -60,6 +63,7 @@ struct IDEMazeControlsPanel: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var mazeVM:  MazeViewModel
     @Binding var isCollapsed: Bool
+    @Binding var cryptoExpanded: Bool
     @State private var showCrypto = false
 
     var body: some View {
@@ -155,7 +159,7 @@ struct IDEMazeControlsPanel: View {
                     Divider().background(Color(hex: "#21262d"))
 
                     // Cryptology collapsible
-                    Button { withAnimation { showCrypto.toggle() } } label: {
+                    Button { withAnimation { showCrypto.toggle(); cryptoExpanded = showCrypto } } label: {
                         HStack {
                             Text("◈ LEAD EDGE CRYPTOLOGY")
                                 .font(.system(size: 8, weight: .semibold, design: .monospaced))
