@@ -385,7 +385,7 @@ struct ArcEdgePanel: View {
                     Circle().fill(Color(hex:"#28c840")).frame(width:8,height:8)
                     Text("◈ ARC EDGE VECTOR").font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(Color(hex:"#00e5ff")).kerning(1.5)
                     Spacer()
-                    Button{withAnimation{show=false}}{Image(systemName:"chevron.left").font(.system(size:10)).foregroundColor(Color(hex:"#4a5568"))}
+                    Button(action:{withAnimation{show=false}}){Image(systemName:"chevron.left").font(.system(size:10)).foregroundColor(Color(hex:"#4a5568"))}
                 }.padding(10).background(Color(hex:"#161b22")).overlay(Divider().background(Color(hex:"#21262d")),alignment:.bottom)
                 VStack(alignment:.leading,spacing:8) {
                     ArcToggle("Tangent System",val:$vm.tangentEnabled)
@@ -420,10 +420,38 @@ struct ArcToggle: View {
     var body: some View { HStack{Text(label).font(.system(size:9,design:.monospaced)).foregroundColor(Color(hex:"#c9d1d9"));Spacer();Toggle("",isOn:$val).labelsHidden().tint(Color(hex:"#00e5ff")).scaleEffect(0.7)}}
 }
 struct ArcAxisCtrl: View {
-    let label:String; let color:Color; @Binding var inf:Double; @Binding var phase:Double; @Binding var vis:Bool
-    var body: some View { VStack(alignment:.leading,spacing:4){HStack{Circle().fill(color).frame(width:7,height:7);Text(label).font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(color);Spacer();Button(vis?"ON":"OFF"){vis.toggle()}.font(.system(size:7,weight:.bold,design:.monospaced)).foregroundColor(vis?color:Color(hex:"#4a5568")).padding(.horizontal,5).padding(.vertical,2).background(vis?color.opacity(0.15):Color.clear).cornerRadius(3)};ArcSl("Influence",val:$inf,range:0...1,unit:"");ArcSl("Phase",val:$phase,range:0...6.28,unit:"rad")}}
+    let label: String; let color: Color
+    @Binding var inf: Double; @Binding var phase: Double; @Binding var vis: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Circle().fill(color).frame(width:7,height:7)
+                Text(label).font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(color)
+                Spacer()
+                let btnLabel = vis ? "ON" : "OFF"
+                let btnColor = vis ? color : Color(hex:"#4a5568")
+                Button(btnLabel) { vis.toggle() }
+                    .font(.system(size:7,weight:.bold,design:.monospaced))
+                    .foregroundColor(btnColor)
+                    .padding(.horizontal,5).padding(.vertical,2)
+                    .background(vis ? color.opacity(0.15) : Color.clear)
+                    .cornerRadius(3)
+            }
+            ArcSl("Influence", val: $inf, range: 0...1, unit: "")
+            ArcSl("Phase",     val: $phase, range: 0...6.28, unit: "rad")
+        }
+    }
 }
 struct ArcSl: View {
-    let label:String; @Binding var val:Double; let range:ClosedRange<Double>; let unit:String
-    var body: some View { HStack{Text(label).font(.system(size:9,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc")).frame(width:58,alignment:.leading);Slider(value:$val,in:range).tint(Color(hex:"#00e5ff"));Text("\(val,specifier:"%.2f")\(unit.isEmpty ? "" : " \(unit)")").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#00e5ff")).frame(width:52,alignment:.trailing)}}
+    let label: String; @Binding var val: Double; let range: ClosedRange<Double>; let unit: String
+    var body: some View {
+        HStack {
+            Text(label).font(.system(size:9,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
+                .frame(width:58,alignment:.leading)
+            Slider(value: $val, in: range).tint(Color(hex:"#00e5ff"))
+            let display = String(format: "%.2f", val) + (unit.isEmpty ? "" : " " + unit)
+            Text(display).font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#00e5ff"))
+                .frame(width:52,alignment:.trailing)
+        }
+    }
 }
