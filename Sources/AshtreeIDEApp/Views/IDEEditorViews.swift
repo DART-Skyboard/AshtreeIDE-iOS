@@ -561,23 +561,26 @@ struct IDETerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Terminal header — matches web app style
+            // Terminal header
             HStack(spacing: 6) {
                 Circle().fill(Color(hex: "#ff5f57")).frame(width: 10, height: 10)
                 Circle().fill(Color(hex: "#febc2e")).frame(width: 10, height: 10)
                 Circle().fill(Color(hex: "#28c840")).frame(width: 10, height: 10)
                 Text("▶ LEATR APP RUNTIME")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Color(hex: "#00ffcc"))
-                    .kerning(2)
-                    .padding(.leading, 6)
+                    .foregroundColor(Color(hex: "#00ffcc")).kerning(2).padding(.leading, 6)
                 Spacer()
+                // Keyboard dismiss button
+                Button {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                } label: {
+                    Text("⌨️↓").font(.system(size: 12))
+                        .padding(4).background(Color(hex: "#00ffcc").opacity(0.1)).cornerRadius(5)
+                }
                 Button {
                     ideVM.compiler.terminalLines = []
                 } label: {
-                    Text("clear")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(Color(hex: "#4a8a7a"))
+                    Text("clear").font(.system(size: 9, design: .monospaced)).foregroundColor(Color(hex: "#4a8a7a"))
                 }
             }
             .padding(.horizontal, 12)
@@ -762,7 +765,25 @@ struct IDEDocsView: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
 
     var body: some View {
-        ScrollView {
+        ZStack {
+            // Logo splash background
+            VStack {
+                if let logo = UIImage(named: "AppLogo") {
+                    Image(uiImage: logo).resizable().scaledToFit()
+                        .frame(width: 180).opacity(0.05)
+                } else {
+                    IDELogoMark(size: 180, accent: themeVM.accent).opacity(0.05)
+                }
+                Text("ASH TREE IDE")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(themeVM.accent.opacity(0.05)).kerning(6)
+                Text("LEATR · Lead Edge Ash Tree Reflex")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(themeVM.accent.opacity(0.04)).kerning(2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+            ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DocBlock(title: "LEATR v2 COMPILER STANDARD",
                          content: "Lead Edge Ash Tree Reflex · © 2025 DART Meadow | Radical Deepscale LLC." +
@@ -826,6 +847,7 @@ struct IDEDocsView: View {
                                "\nimport · return")
             }
             .padding(16)
+            }
         }
         .background(themeVM.bg)
     }
