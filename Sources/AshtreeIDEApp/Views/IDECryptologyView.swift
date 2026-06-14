@@ -586,19 +586,32 @@ struct CryptoMazeLayerRow: View {
     @Binding var layer: (w: Int, h: Int, d: Int, mode: String)
     let onDelete: () -> Void
     var body: some View {
-        HStack(spacing:6) {
-            Text("ROOT").font(.system(size:7,design:.monospaced)).foregroundColor(Color(hex:"#00ffcc"))
-            Text("W:\(layer.w)").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
-            Stepper("",value:$layer.w,in:3...50).labelsHidden().scaleEffect(0.7)
-            Text("H:\(layer.h)").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
-            Stepper("",value:$layer.h,in:3...50).labelsHidden().scaleEffect(0.7)
-            Text("D:\(layer.d)").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
-            Stepper("",value:$layer.d,in:1...20).labelsHidden().scaleEffect(0.7)
-            Button(action:onDelete) {
-                Image(systemName:"minus.circle").font(.system(size:12)).foregroundColor(Color(hex:"#ff4466"))
+        VStack(alignment:.leading,spacing:4) {
+            HStack {
+                Text("ROOT MAZE LAYER")
+                    .font(.system(size:7,weight:.semibold,design:.monospaced))
+                    .foregroundColor(Color(hex:"#00ffcc"))
+                Spacer()
+                Button(action:onDelete) {
+                    Image(systemName:"minus.circle")
+                        .font(.system(size:12)).foregroundColor(Color(hex:"#ff4466"))
+                }
             }
+            HStack(spacing:8) {
+                Text("W").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#4a5568"))
+                Stepper("\(layer.w)",value:$layer.w,in:3...50)
+                    .font(.system(size:9,design:.monospaced)).labelsHidden()
+                Text("H").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#4a5568"))
+                Stepper("\(layer.h)",value:$layer.h,in:3...50)
+                    .font(.system(size:9,design:.monospaced)).labelsHidden()
+                Text("D").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#4a5568"))
+                Stepper("\(layer.d)",value:$layer.d,in:1...20)
+                    .font(.system(size:9,design:.monospaced)).labelsHidden()
+            }
+            Text("W:\(layer.w)  H:\(layer.h)  D:\(layer.d)")
+                .font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
         }
-        .padding(6).background(Color(hex:"#0a1628")).cornerRadius(4)
+        .padding(8).background(Color(hex:"#0a1628")).cornerRadius(6)
     }
 }
 
@@ -606,21 +619,33 @@ struct CryptoInterchangeDimRow: View {
     @Binding var dim: (id: Int, w: Int, h: Int, d: Int, mode: String)
     let onDelete: () -> Void
     var body: some View {
-        HStack(spacing:6) {
-            Text("DIM\(dim.id)").font(.system(size:7,design:.monospaced)).foregroundColor(Color(hex:"#0088ff"))
-            Text("W:\(dim.w)").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
-            Stepper("",value:$dim.w,in:3...30).labelsHidden().scaleEffect(0.7)
-            Text("H:\(dim.h)").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
-            Stepper("",value:$dim.h,in:3...30).labelsHidden().scaleEffect(0.7)
-            Picker("",selection:$dim.mode){
-                Text("Cubic").tag("cubic")
-                Text("Planar").tag("planar")
-            }.pickerStyle(.menu).tint(Color(hex:"#0088ff")).font(.system(size:8))
-            Button(action:onDelete) {
-                Image(systemName:"minus.circle").font(.system(size:12)).foregroundColor(Color(hex:"#ff4466"))
+        VStack(alignment:.leading,spacing:4) {
+            HStack {
+                Text("DIM \(dim.id)")
+                    .font(.system(size:7,weight:.semibold,design:.monospaced))
+                    .foregroundColor(Color(hex:"#0088ff"))
+                Picker("",selection:$dim.mode){
+                    Text("Cubic").tag("cubic")
+                    Text("Planar").tag("planar")
+                }.pickerStyle(.segmented).frame(maxWidth:120)
+                Spacer()
+                Button(action:onDelete) {
+                    Image(systemName:"minus.circle")
+                        .font(.system(size:12)).foregroundColor(Color(hex:"#ff4466"))
+                }
             }
+            HStack(spacing:8) {
+                Text("W").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#4a5568"))
+                Stepper("\(dim.w)",value:$dim.w,in:3...30)
+                    .font(.system(size:9,design:.monospaced)).labelsHidden()
+                Text("H").font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#4a5568"))
+                Stepper("\(dim.h)",value:$dim.h,in:3...30)
+                    .font(.system(size:9,design:.monospaced)).labelsHidden()
+            }
+            Text("W:\(dim.w)  H:\(dim.h)  Mode:\(dim.mode)")
+                .font(.system(size:8,design:.monospaced)).foregroundColor(Color(hex:"#8ab4cc"))
         }
-        .padding(6).background(Color(hex:"#0a1628")).cornerRadius(4)
+        .padding(8).background(Color(hex:"#0a1628")).cornerRadius(6)
     }
 }
 
