@@ -44,11 +44,11 @@ final class CryptologyVM: ObservableObject {
         var allSegments: [[String: Any]] = []
         for layer in rootMazeLayers {
             let segs = generateMazeSegments(w: layer.w, h: layer.h, d: layer.d, mode: layer.mode)
-            allSegments.append(["type": layer.mode, "segments": segs.count, "config": ["w": layer.w, "h": layer.h, "d": layer.d]])
+            allSegments.append(["type": layer.mode, "segments": segs, "config": ["w": layer.w, "h": layer.h, "d": layer.d]])
         }
         for dim in interchangeDims {
             let segs = generateMazeSegments(w: dim.w, h: dim.h, d: dim.d, mode: dim.mode)
-            allSegments.append(["type": "interchange_\(dim.id)", "segments": segs.count])
+            allSegments.append(["type": "interchange_\(dim.id)", "segments": segs])
         }
 
         let combinedSeed = messageText + editorContent + "\(allSegments)"
@@ -425,10 +425,10 @@ struct IDECryptologyView: View {
                 // ── Key generation ────────────────────────────────────
                 CryptoSectionHeader("MAZE KEYS")
                 HStack(spacing:8) {
-                    CryptoBtn("◈ Generate Keys", color:Color(hex:"#00ffcc")) {
+                    CryptoBtn(label:"◈ Generate Keys", color:Color(hex:"#00ffcc")) {
                         Task { await vm.generateMazeKeys(editorContent: ideVM.sourceCode) }
                     }
-                    CryptoBtn("✕ Clear All", color:Color(hex:"#ff4466")) { vm.clearAll() }
+                    CryptoBtn(label:"✕ Clear All", color:Color(hex:"#ff4466")) { vm.clearAll() }
                 }
 
                 if !vm.privateKey.isEmpty {
@@ -442,7 +442,7 @@ struct IDECryptologyView: View {
 
                 // ── Encrypt / Download ────────────────────────────────
                 CryptoSectionHeader("ENCRYPT & EXPORT")
-                CryptoBtn("▲ Encrypt → ZIP", color:Color(hex:"#00ffcc")) {
+                CryptoBtn(label:"▲ Encrypt → ZIP", color:Color(hex:"#00ffcc")) {
                     Task { await vm.encryptAndPackageZip(editorContent: ideVM.sourceCode) }
                 }
 
@@ -505,7 +505,7 @@ struct IDECryptologyView: View {
                             }
                         }
 
-                        CryptoBtn("▼ Decrypt", color:Color(hex:"#bf5fff")) {
+                        CryptoBtn(label:"▼ Decrypt", color:Color(hex:"#bf5fff")) {
                             Task { await vm.decryptFromZip() }
                         }
 
