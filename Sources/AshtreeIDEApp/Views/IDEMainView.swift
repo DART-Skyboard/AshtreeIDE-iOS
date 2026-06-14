@@ -451,7 +451,7 @@ struct IDEDrawerFilesTab: View {
                         }
 
                         Button {
-                            ideVM.newFile()
+                            ideVM.newFile()           // creates unique file + persists immediately
                             withAnimation { ideVM.showDrawer = false }
                         } label: {
                             Label("New Local File", systemImage: "plus.square").foregroundColor(themeVM.accent)
