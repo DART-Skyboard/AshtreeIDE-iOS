@@ -330,37 +330,108 @@ struct IDEDrawerFilesTab: View {
     @EnvironmentObject var ideVM:   IDEState
 
     var body: some View {
-        List {
-            Section {
-                // New file
-                Button {
-                    ideVM.newFile()
-                    withAnimation { ideVM.showDrawer = false }
-                } label: {
-                    Label("New File", systemImage: "plus.square")
-                        .foregroundColor(themeVM.accent)
+        VStack(spacing: 0) {
+            // Source picker
+            Picker("Source", selection: $ideVM.fileSource) {
+                ForEach(IDEState.FileSource.allCases, id: \.self) { s in
+                    Label(s.rawValue, systemImage: s.icon).tag(s)
                 }
+            }.pickerStyle(.segmented).padding(10)
+            .background(themeVM.surface)
 
-                // Examples
-                ForEach(ideVM.examples, id: \.name) { ex in
-                    Button {
-                        ideVM.loadExample(ex.code, name: ex.name.lowercased().replacingOccurrences(of: " ", with: "_"))
-                        withAnimation { ideVM.showDrawer = false }
-                    } label: {
-                        Label(ex.name, systemImage: ex.icon)
-                            .foregroundColor(themeVM.text)
+            List {
+                switch ideVM.fileSource {
+                case .examples:
+                    Section {
+                        Button {
+                            ideVM.newFile()
+                            withAnimation { ideVM.showDrawer = false }
+                        } label: {
+                            Label("New File", systemImage: "plus.square").foregroundColor(themeVM.accent)
+                        }
+                        ForEach(ideVM.examples, id: \.name) { ex in
+                            Button {
+                                ideVM.loadExample(ex.code, name: ex.name.lowercased().replacingOccurrences(of: " ", with: "_"))
+                                withAnimation { ideVM.showDrawer = false }
+                            } label: {
+                                Label(ex.name, systemImage: ex.icon).foregroundColor(themeVM.text)
+                            }
+                        }
+                    } header: {
+                        Text("EXAMPLE SCRIPTS").font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(themeVM.dim).kerning(1)
+                    }
+
+                case .repository:
+                    // Show repo files
+                    if ideVM.isLoadingFiles {
+                        HStack { Spacer(); ProgressView().tint(themeVM.accent); Spacer() }.padding()
+                    } else if let repo = ideVM.currentRepo {
+                        Section {
+                            if !ideVM.currentPath.isEmpty {
+                                Button {
+                                    let parent = String(ideVM.currentPath.split(separator: "/").dropLast().joined(separator: "/"))
+                                    Task { await ideVM.loadFiles(repo: repo, path: parent) }
+                                } label: {
+                                    Label(".. (up)", systemImage: "arrow.up.doc").foregroundColor(themeVM.dim)
+                                }
+                            }
+                            ForEach(ideVM.repoFiles, id: \.path) { file in
+                                Button {
+                                    if file.type == "dir" {
+                                        Task { await ideVM.loadFiles(repo: repo, path: file.path) }
+                                    } else {
+                                        Task { await ideVM.openFile(file); withAnimation { ideVM.showDrawer = false } }
+                                    }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: file.type == "dir" ? "folder.fill" : (file.name.hasSuffix(".ash") ? "chevron.left.forwardslash.chevron.right" : "doc"))
+                                            .foregroundColor(file.type == "dir" ? themeVM.accent : (file.name.hasSuffix(".ash") ? Color(hex: "#00ffcc") : themeVM.dim))
+                                        Text(file.name).font(.system(size: 12, design: file.name.hasSuffix(".ash") ? .monospaced : .default))
+                                            .foregroundColor(themeVM.text)
+                                    }
+                                }
+                            }
+                        } header: {
+                            Text("\(repo.name)\(ideVM.currentPath.isEmpty ? "" : "/\(ideVM.currentPath)")")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .foregroundColor(themeVM.dim).kerning(1)
+                        }
+                    } else {
+                        Text("Select a repository from the Repos tab")
+                            .font(.system(size: 11)).foregroundColor(themeVM.dim).padding()
+                    }
+
+                case .local:
+                    Section {
+                        Button {
+                            ideVM.newFile()
+                            withAnimation { ideVM.showDrawer = false }
+                        } label: {
+                            Label("New Local File", systemImage: "plus.square").foregroundColor(themeVM.accent)
+                        }
+                        ForEach(ideVM.localFiles, id: \.self) { name in
+                            Button {
+                                ideVM.openLocalFile(name)
+                                withAnimation { ideVM.showDrawer = false }
+                            } label: {
+                                Label(name, systemImage: "doc.text").foregroundColor(themeVM.text)
+                            }
+                        }
+                        Button {
+                            ideVM.saveLocally()
+                        } label: {
+                            Label("Save Current to Device", systemImage: "square.and.arrow.down").foregroundColor(themeVM.dim)
+                        }
+                    } header: {
+                        Text("LOCAL DEVICE FILES").font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(themeVM.dim).kerning(1)
                     }
                 }
-            } header: {
-                Text("EXAMPLE SCRIPTS")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(themeVM.dim)
-                    .kerning(1)
             }
+            .listStyle(.plain).scrollContentBackground(.hidden)
         }
-        .listStyle(.plain)
-        .background(Color.clear)
-        .scrollContentBackground(.hidden)
+        .onAppear { ideVM.loadLocalFiles() }
     }
 }
 
@@ -404,8 +475,8 @@ struct IDEDrawerReposTab: View {
             } else {
                 List(ideVM.repos) { repo in
                     Button {
-                        Task { await ideVM.loadFiles(repo: repo) }
-                        ideVM.drawerTab = .files
+                        // selectRepo fixes nav: switches to repository file view
+                        Task { await ideVM.selectRepo(repo) }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Label(repo.name, systemImage: repo.isPrivate ? "lock.fill" : "folder")
