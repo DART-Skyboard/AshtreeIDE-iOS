@@ -605,69 +605,65 @@ struct IDEDocsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DocBlock(title: "LEATR v2 COMPILER STANDARD",
-                    body: "Lead Edge Ash Tree Reflex · © 2025 DART Meadow | Radical Deepscale LLC.\n\nSwitch equations wrap every syntax pattern:\n  Encode (OPEN  0→1): (xa²√xa) - 1\n  Decode (CLOSE 1→0): (xa²√xa) + 1")
-                DocBlock(title: "NODE STRUCTURE", body: """
-(NodeName):-: {        // Switch OPEN
-  {{env:MyProject}}    // Outer tag — env isolation shell
-  [[owner:username]]   // Inner tag — script identity
-  [poly: data-matrix]  // Poly — math/physics isolated
-  [net: layer]         // Net  — network (log-iterative)
-  with var (s) {
-    irin ("Data: input")
-    Maze               // OOO Natural Tool #1
-    thenplace var (s) with var (s)
-  }
-  irout ("Result: " placeto (s))
-}|';'|                 // Switch CLOSE
-                    """)
-                DocBlock(title: "TAG SYSTEM", body: """
-{{outer-tag}}  — Environment isolation shell (hardware frame)
-[[inner-tag]]  — Script ownership. Double-tagging prevents
-                 cross-compilation between users.
-[poly:...]     — Polynomial/physics container. Math data
-                 isolated from syntax runtime.
-[net:...]      — Network syntax. Logarithmic iterative form.
-                    """)
-                DocBlock(title: "ORDER OF OPERATIONS (19)", body: """
-Natural Tools (1-7):
-Maze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors
+                         body: "Lead Edge Ash Tree Reflex · © 2025 DART Meadow | Radical Deepscale LLC." +
+                               "\nSwitch equations wrap every syntax pattern:" +
+                               "\n  Encode (OPEN):  (xa²√xa) - 1" +
+                               "\n  Decode (CLOSE): (xa²√xa) + 1")
 
-Math/Physics (8-19):
-Parentheses · Exponents · Multiplication · Division
-Addition · Subtraction · Logarithm · Trigonometry
-Temperature · Velocity · Pressure · Mass · Photosynthesis
+                DocBlock(title: "NODE STRUCTURE",
+                         body: "(NodeName):-: {" +
+                               "\n  {{env:MyProject}}    // outer tag" +
+                               "\n  [[owner:username]]   // inner tag" +
+                               "\n  [poly: data-matrix]  // math" +
+                               "\n  [net: layer]         // network" +
+                               "\n  with var (s) {" +
+                               "\n    irin (\"Data: input\")" +
+                               "\n    Maze" +
+                               "\n    thenplace var (s) with var (s)" +
+                               "\n  }" +
+                               "\n  irout (\"Result: \" placeto (s))" +
+                               "\n}|';\'|")
 
-Senses (AI):
-Touch · Taste · Vision · Smell · Hear
-                    """)
-                DocBlock(title: "BRPN — PENDULUM NODE", body: """
-After compile, shell routing via Buoyancy Reflex:
-  f = formation  (1.0 if outer-tags present)
-  r = reflex     (1.0 if inner-tags present)
-  p = performance (nodeCount / 5, max 1.0)
-  frp = f × r × p
-  buoyancy = frp × √|frp|
+                DocBlock(title: "TAG SYSTEM",
+                         body: "{{outer-tag}}  — Environment isolation shell" +
+                               "\n[[inner-tag]]  — Script ownership (double-tagged)" +
+                               "\n[poly:...]     — Polynomial/physics container" +
+                               "\n[net:...]      — Network syntax (log-iterative mode)")
 
-Shell:
-  ≥ 0.76 → GEOLOGICAL
-  ≥ 0.44 → MARITIME
-  < 0.44 → AEROSPACE
-                    """)
-                DocBlock(title: "GL DRIVERS", body: """
-import (GLDrivers)  // Load 3D GL runtime
+                DocBlock(title: "ORDER OF OPERATIONS (19)",
+                         body: "Natural Tools (1-7):" +
+                               "\nMaze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors" +
+                               "\n\nMath/Physics (8-19):" +
+                               "\nParentheses · Exponents · Multiplication · Division" +
+                               "\nAddition · Subtraction · Logarithm · Trigonometry" +
+                               "\nTemperature · Velocity · Pressure · Mass · Photosynthesis" +
+                               "\n\nSenses (AI):" +
+                               "\nTouch · Taste · Vision · Smell · Hear")
 
-Available nodes: ThreeScene · LightNode · ArcEdgeNode
-  CameraNode · ParticleNode · GeometryNode
-  MaterialNode · MeshNode · AnimateNode · UIOverlayNode
+                DocBlock(title: "BRPN — PENDULUM NODE",
+                         body: "After compile, shell routing via Buoyancy Reflex:" +
+                               "\n  f = formation  (1.0 if outer-tags present)" +
+                               "\n  r = reflex     (1.0 if inner-tags present)" +
+                               "\n  p = performance (nodeCount / 5, max 1.0)" +
+                               "\n  frp = f × r × p" +
+                               "\n  buoyancy = frp × sqrt(|frp|)" +
+                               "\n\nShell: >=0.76 = GEOLOGICAL  >=0.44 = MARITIME  <0.44 = AEROSPACE")
 
-Arc Edge math (Justin Craig Venable):
-  Circumference: sqrt(d×3)²   (no π)
-  Area:          circ²
-  Volume:        area³
-  Sphere SA:     vol × 0.25
-  Branch:        1/8-circle arc along CatmullRom curve
-                    """)
-                DocBlock(title: "KEYWORDS", body: "irin · irout · thenplace · place · placeto\nResearch · Report · with · var · when · where\nand · or · not · for · else · is · if · end\nimport · return")
+                DocBlock(title: "GL DRIVERS",
+                         body: "import (GLDrivers)  // Load 3D GL runtime" +
+                               "\n\nNodes: ThreeScene · LightNode · ArcEdgeNode" +
+                               "\n  CameraNode · ParticleNode · GeometryNode" +
+                               "\n  MaterialNode · MeshNode · AnimateNode · UIOverlayNode" +
+                               "\n\nArc Edge math (Justin Craig Venable):" +
+                               "\n  Circumference: sqrt(d×3)^2   (no pi)" +
+                               "\n  Area: circ^2   Volume: area^3   Sphere SA: vol×0.25" +
+                               "\n  Branch: 1/8-circle arc")
+
+                DocBlock(title: "KEYWORDS",
+                         body: "irin · irout · thenplace · place · placeto" +
+                               "\nResearch · Report · with · var · when · where" +
+                               "\nand · or · not · for · else · is · if · end" +
+                               "\nimport · return")
             }
             .padding(16)
         }
