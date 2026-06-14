@@ -203,6 +203,20 @@ struct IDEWelcomeView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
+                // Apple Sign In error (e.g. "Sign Up Not Completed" = Apple server issue)
+                if let appleErr = authVM.appleErrorMessage {
+                    VStack(spacing: 4) {
+                        Text("⚠ Apple Sign In")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.orange)
+                        Text(appleErr)
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 6)
+                }
                 if let err = authVM.error {
                     Text(err)
                         .font(.system(size: 11))
