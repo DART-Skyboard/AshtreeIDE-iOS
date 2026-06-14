@@ -433,7 +433,7 @@ struct IDEDrawerFilesTab: View {
                     Section {
                         // Restore all default example project files
                         Button {
-                            IDEState.examples.forEach { ex in
+                            ideVM.examples.forEach { ex in
                                 let fname = ex.name.lowercased()
                                     .replacingOccurrences(of: " ", with: "_") + ".ash"
                                 let key = "ide_local_\(fname)"
