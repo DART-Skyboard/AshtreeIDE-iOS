@@ -175,30 +175,30 @@ struct AshCodeEditorView: UIViewRepresentable {
         }
 
         // Comments
-        re("//[^\n]*",       UIColor(themeVM.syntaxComment))
+        re("//[^\n]*",       UIColor(red:0.29,green:0.54,blue:0.48,alpha:1))
         // Strings
-        re("\"(?:[^\"\\\\]|\\\\.)*\"", UIColor(themeVM.syntaxString))
+        re("\"(?:[^\"\\\\]|\\\\.)*\"", UIColor(red:0.81,green:0.57,blue:0.47,alpha:1))
         // Outer {{}}
-        re("\\{\\{[^}]+\\}\\}", UIColor(themeVM.syntaxOuterTag))
+        re("\\{\\{[^}]+\\}\\}", UIColor(red:1.0,green:0.84,blue:0.0,alpha:1))
         // Inner [[]]
-        re("\\[\\[[^\\]]+\\]\\]", UIColor(themeVM.syntaxInnerTag))
+        re("\\[\\[[^\\]]+\\]\\]", UIColor(red:0.75,green:0.37,blue:1.0,alpha:1))
         // Poly/net tags
-        re("\\[(?:poly|net):[^\\]]+\\]", UIColor(themeVM.syntaxPolyTag))
+        re("\\[(?:poly|net):[^\\]]+\\]", UIColor(red:1.0,green:0.58,blue:0.0,alpha:1))
         // Keywords
         let kws = LeatrEngine.keywords.joined(separator: "|")
-        re("\\b(\(kws))\\b", UIColor(themeVM.syntaxKeyword), isBold: true)
+        re("\\b(\(kws))\\b", UIColor(red:0.0,green:0.90,blue:1.0,alpha:1), isBold: true)
         // Declarations
         let decls = LeatrEngine.declarations.joined(separator: "|")
-        re("\\b(\(decls))\\b", UIColor(themeVM.syntaxDeclaration))
+        re("\\b(\(decls))\\b", UIColor(red:0.61,green:0.86,blue:1.0,alpha:1))
         // Natural tools
         let tools = LeatrEngine.naturalTools.joined(separator: "|")
-        re("\\b(\(tools))\\b", UIColor(themeVM.syntaxTool))
+        re("\\b(\(tools))\\b", UIColor(red:0.75,green:0.37,blue:1.0,alpha:1))
         // Node start: (Name):-:{
-        re("\\([A-Za-z][A-Za-z0-9_]*\\)(?=:-:)", UIColor(themeVM.syntaxNodeStart), isBold: true)
+        re("\\([A-Za-z][A-Za-z0-9_]*\\)(?=:-:)", UIColor(red:0.0,green:1.0,blue:0.80,alpha:1), isBold: true)
         // Node end: }|';'|
-        re("\\}\\|';'\\|", UIColor(themeVM.syntaxNodeStart), isBold: true)
+        re("\\}\\|';'\\|", UIColor(red:0.0,green:1.0,blue:0.80,alpha:1), isBold: true)
         // Numbers
-        re("\\b\\d+\\.?\\d*\\b", UIColor(themeVM.syntaxNumber))
+        re("\\b\\d+\\.?\\d*\\b", UIColor(red:0.71,green:0.81,blue:0.66,alpha:1))
         // gl. calls
         re("gl\\.[a-z]+", UIColor(Color(hex: "#00e5ff")))
 
