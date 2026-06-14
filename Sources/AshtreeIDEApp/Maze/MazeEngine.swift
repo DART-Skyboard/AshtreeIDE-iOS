@@ -227,6 +227,7 @@ public final class MazeViewModel: ObservableObject {
     @Published public var result: MazeResult?
     @Published public var isGenerating = false
     @Published public var showSolution = false
+    @Published public var triggerReset: Int = 0
     public var resetCamera: (() -> Void)?
     @Published public var statusText = "Configure and generate a maze"
     @Published public var sceneNode: SCNNode?
