@@ -358,7 +358,7 @@ public final class LeatrEngine: ObservableObject {
         if netMode {
             log("NET", "⟳ Network compile — log-iterative mode", "#39ff14")
             for (idx, node) in nodes.enumerated() {
-                let lv = log(Double(idx + 1) + 1)
+                let lv = Foundation.log(Double(idx + 1) + 1)
                 log("NET", "[\(idx+1)] \(node.name): log(n)=\(String(format:"%.4f",lv))", "#39ff14")
             }
         } else {
@@ -456,4 +456,4 @@ public final class LeatrEngine: ObservableObject {
     }
 }
 
-func log(_ x: Double) -> Double { Foundation.log(max(x, Double.leastNormalMagnitude)) }
+// log helper removed — use Foundation.log directly
