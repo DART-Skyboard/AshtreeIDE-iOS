@@ -502,10 +502,13 @@ struct IDEGLOutputPanel: View {
 
     private func buildGLScene() async {
         isRendering = true
-        // Detect if the current script uses Arc Edge Vector nodes
+        // ALWAYS reset first — prevents stale ArcEdge panel persisting across scripts
+        showArcEdge = false
+        glScene     = nil
         let src = ideVM.sourceCode
+        // Arc Edge: only ArcEdgeScene/ArcVectorNode specific nodes — NOT generic GLDrivers
         let arcKeywords = ["ArcEdgeScene","ArcVectorNode","ArcPhysicsNode","ArcGridNode",
-                           "ArcHandleNode","import (GLDrivers)","gl.arc","arc_edge"]
+                           "ArcHandleNode","gl.arc","arc_edge"]
         let isArcEdge = arcKeywords.contains { src.contains($0) }
         if isArcEdge {
             showArcEdge = true
@@ -655,9 +658,20 @@ struct IDETerminalView: View {
                     .autocapitalization(.none)
                     .padding(.leading, 8)
                     .onSubmit {
-                        ideVM.compiler.handleTerminalCommand(input, source: ideVM.sourceCode)
-                        input = ""
+                        let cmd = input; input = ""
+                        ideVM.compiler.handleTerminalCommand(cmd, source: ideVM.sourceCode)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { focused = true }
                     }
+                // Inline Done button — visible when keyboard is up, doesn't need toolbar
+                if focused {
+                    Button("Done") { focused = false }
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Color(hex: "#00ffcc"))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color(hex: "#00ffcc").opacity(0.1))
+                        .cornerRadius(5)
+                        .padding(.trailing, 4)
+                }
 
                 Spacer()
 
