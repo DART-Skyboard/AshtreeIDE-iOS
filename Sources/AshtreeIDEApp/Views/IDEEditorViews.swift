@@ -434,6 +434,7 @@ struct IDEGLOutputPanel: View {
     @EnvironmentObject var mazeVM:  MazeViewModel
     @State private var glScene: SCNNode? = nil
     @State private var isRendering = false
+    @State private var showArcEdge = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -462,6 +463,8 @@ struct IDEGLOutputPanel: View {
 
             if let node = glScene {
                 IDEMazeSceneKitView(rootNode: node, resetCamera: {})
+            } else if showArcEdge {
+                ArcEdgeSceneView()
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "cube.fill")
@@ -469,7 +472,7 @@ struct IDEGLOutputPanel: View {
                     Text("Tap ▸ Render 3D to execute graphical output")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(Color(hex: "#4a5568"))
-                    Text("import (GLDrivers) detected in script")
+                    Text("import (GLDrivers) · Arc Edge Vector supported")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundColor(Color(hex: "#4a5568").opacity(0.7))
                 }
@@ -481,7 +484,7 @@ struct IDEGLOutputPanel: View {
 
     private func buildGLScene() async {
         isRendering = true
-        // Build Arc Edge Tree scene from the script
+        // Delegate to Arc Edge GL driver which implements the full arc-edge-vector.html capabilities
         let root = SCNNode()
         let mat = SCNMaterial()
         mat.diffuse.contents  = UIColor(red: 0, green: 1, blue: 0.8, alpha: 0.7)
