@@ -160,8 +160,11 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
     private var appleAuthController: ASAuthorizationController?
     private var currentNonce: String = ""
 
-    @Published public var isSignedIn = false, isGuest = false, githubConnected = false
-    @Published public var username = "", githubUsername = ""
+    @Published public var isSignedIn = false
+    @Published public var isGuest = false
+    @Published public var githubConnected = false
+    @Published public var username = ""
+    @Published public var githubUsername = ""
     @Published public var githubAvatarURL: URL? = nil
     @Published public var avatarImage: UIImage? = nil
     @Published public var appleUserId = ""
