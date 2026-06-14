@@ -1,280 +1,177 @@
-// ============================================================
-//  GitHubAuth.swift — GitHub Device Flow OAuth + Keychain
-//  Ash Tree IDE · © 2025 DART Meadow | Radical Deepscale LLC.
-//
-//  Exact same pattern as ArcLake-iOS ArcAuthViewModel + ArcGitHubClient.
-//  GitHub OAuth App: Ov23li2K0njEqO1WTSdD (shared with ArcLake)
-// ============================================================
-
+// GitHubAuth.swift v2 — SHA256 nonce fix + silent GitHub re-auth
+// Ash Tree IDE · © 2025 DART Meadow | Radical Deepscale LLC.
 import Foundation
 import AuthenticationServices
+import CryptoKit
 import SwiftUI
-
-// MARK: - Keychain Helper
 
 public enum KeychainHelper {
     public static func save(key: String, value: String) {
         let data = Data(value.utf8)
-        let query: [CFString: Any] = [
-            kSecClass:            kSecClassGenericPassword,
-            kSecAttrAccount:      key,
-            kSecValueData:        data,
-            kSecAttrAccessible:   kSecAttrAccessibleAfterFirstUnlock
-        ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
+        let q: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrAccount: key,
+                                   kSecValueData: data, kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock]
+        SecItemDelete(q as CFDictionary); SecItemAdd(q as CFDictionary, nil)
     }
-
     public static func load(key: String) -> String? {
-        let query: [CFString: Any] = [
-            kSecClass:            kSecClassGenericPassword,
-            kSecAttrAccount:      key,
-            kSecReturnData:       true,
-            kSecMatchLimit:       kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let q: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrAccount: key,
+                                   kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
+        var r: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &r) == errSecSuccess, let d = r as? Data else { return nil }
+        return String(data: d, encoding: .utf8)
     }
-
     public static func delete(key: String) {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: key
-        ]
-        SecItemDelete(query as CFDictionary)
+        SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrAccount: key] as CFDictionary)
     }
 }
-
-// MARK: - Saved Account
 
 public struct IDESavedAccount: Identifiable {
-    public let id = UUID()
-    public let username: String
-    public let provider: String  // "github" | "apple" | "guest"
-    public let avatarURL: URL?
+    public let id = UUID(); public let username, provider: String; public let avatarURL: URL?
 }
-
-// MARK: - Device Flow Display
-
 public struct IDEDeviceFlow: Identifiable {
-    public let id = UUID()
-    public let userCode: String
-    public let verifyURL: URL
-    public let deviceCode: String
-    public let interval: Int
-    public var isPolling = false
-    public var error: String?
+    public let id = UUID(); public let userCode: String; public let verifyURL: URL
+    public let deviceCode: String; public let interval: Int
+    public var isPolling = false; public var error: String?
 }
-
-// MARK: - GitHub Models
-
 public struct IDEGitHubRepo: Identifiable, Codable {
-    public let id: Int
-    public let name: String
-    public let fullName: String
-    public let isPrivate: Bool
-    public let description: String?
-    public let defaultBranch: String
-
+    public let id: Int; public let name, fullName: String; public let isPrivate: Bool
+    public let description: String?; public let defaultBranch: String
     enum CodingKeys: String, CodingKey {
         case id, name, description
-        case fullName    = "full_name"
-        case isPrivate   = "private"
-        case defaultBranch = "default_branch"
+        case fullName = "full_name"; case isPrivate = "private"; case defaultBranch = "default_branch"
     }
 }
-
 public struct IDEGitHubFile: Codable {
-    public let name: String
-    public let path: String
-    public let sha: String?
-    public let downloadURL: String?
-    public let type: String
-    public let size: Int?
-
+    public let name, path: String; public let sha, downloadURL, type: String?; public let size: Int?
     enum CodingKeys: String, CodingKey {
-        case name, path, sha, type, size
-        case downloadURL = "download_url"
+        case name, path, sha, type, size; case downloadURL = "download_url"
     }
 }
-
-// MARK: - GitHub Client (ArcLake actor pattern)
 
 public actor IDEGitHubClient {
     public static let shared = IDEGitHubClient()
     private let session = URLSession.shared
     private let base = "https://api.github.com"
     private var _token: String?
-
-    public func setToken(_ token: String) {
-        _token = token
-        KeychainHelper.save(key: "ide_github_pat", value: token)
-    }
+    public func setToken(_ t: String) { _token = t; KeychainHelper.save(key: "ide_github_pat", value: t) }
     public func loadToken() { _token = KeychainHelper.load(key: "ide_github_pat") }
     public func clearToken() { _token = nil; KeychainHelper.delete(key: "ide_github_pat") }
-    public var hasToken: Bool { _token != nil }
-
-    private func headers() -> [String: String] {
-        var h = ["Accept": "application/vnd.github+json",
-                 "X-GitHub-Api-Version": "2022-11-28"]
-        if let t = _token { h["Authorization"] = "Bearer \(t)" }
-        return h
+    public var hasToken: Bool { !(_token?.isEmpty ?? true) }
+    private func headers() -> [String:String] {
+        var h = ["Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"]
+        if let t = _token { h["Authorization"] = "Bearer \(t)" }; return h
     }
 
-    // Device flow
     public func startDeviceFlow() async throws -> IDEDeviceFlow {
         var req = URLRequest(url: URL(string: "https://github.com/login/device/code")!)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.httpMethod = "POST"; req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = "client_id=Ov23li2K0njEqO1WTSdD&scope=repo,read:user".data(using: .utf8)
         let (data, _) = try await session.data(for: req)
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let userCode   = json["user_code"]    as? String,
-              let verifyStr  = json["verification_uri"] as? String,
-              let verifyURL  = URL(string: verifyStr),
-              let deviceCode = json["device_code"]  as? String,
-              let interval   = json["interval"]     as? Int else {
-            throw URLError(.badServerResponse)
-        }
-        return IDEDeviceFlow(userCode: userCode, verifyURL: verifyURL,
-                             deviceCode: deviceCode, interval: interval)
+        guard let j = try? JSONSerialization.jsonObject(with: data) as? [String:Any],
+              let uc = j["user_code"] as? String, let vs = j["verification_uri"] as? String,
+              let vu = URL(string: vs), let dc = j["device_code"] as? String,
+              let iv = j["interval"] as? Int else { throw URLError(.badServerResponse) }
+        return IDEDeviceFlow(userCode: uc, verifyURL: vu, deviceCode: dc, interval: iv)
     }
 
     public func pollDeviceFlow(deviceCode: String, interval: Int) async throws -> String? {
         for _ in 0..<60 {
-            try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
+            try await Task.sleep(nanoseconds: UInt64(max(interval,5)) * 1_000_000_000)
             var req = URLRequest(url: URL(string: "https://github.com/login/oauth/access_token")!)
-            req.httpMethod = "POST"
-            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.httpMethod = "POST"; req.setValue("application/json", forHTTPHeaderField: "Accept")
             req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             req.httpBody = "client_id=Ov23li2K0njEqO1WTSdD&device_code=\(deviceCode)&grant_type=urn:ietf:params:oauth:grant-type:device_code".data(using: .utf8)
-            guard let (data, _) = try? await session.data(for: req),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            if let token = json["access_token"] as? String { return token }
-            let err = json["error"] as? String ?? ""
-            if err == "access_denied" || err == "expired_token" { return nil }
+            guard let (d,_) = try? await session.data(for: req),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String:Any] else { continue }
+            if let t = j["access_token"] as? String { return t }
+            let e = j["error"] as? String ?? ""
+            if e == "access_denied" || e == "expired_token" { return nil }
         }
         return nil
     }
 
     public func fetchUser() async throws -> (login: String, name: String?, avatarURL: String?) {
-        struct GHUser: Decodable {
-            let login: String; let name: String?
-            let avatar_url: String?
-        }
-        let data = try await get("/user")
-        let u = try JSONDecoder().decode(GHUser.self, from: data)
+        struct U: Decodable { let login: String; let name: String?; let avatar_url: String? }
+        let u = try JSONDecoder().decode(U.self, from: try await get("/user"))
         return (u.login, u.name, u.avatar_url)
     }
-
     public func fetchAvatar(urlStr: String) async throws -> Data {
         guard let url = URL(string: urlStr) else { throw URLError(.badURL) }
         return try await session.data(from: url).0
     }
-
     public func listRepos() async throws -> [IDEGitHubRepo] {
-        let data = try await get("/user/repos?per_page=100&sort=updated&type=all")
-        return try JSONDecoder().decode([IDEGitHubRepo].self, from: data)
+        try JSONDecoder().decode([IDEGitHubRepo].self, from: try await get("/user/repos?per_page=100&sort=updated&type=all"))
     }
-
     public func listFiles(owner: String, repo: String, path: String = "") async throws -> [IDEGitHubFile] {
-        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        let p = path.isEmpty ? "" : "/\(encoded)"
+        let enc = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        let p = path.isEmpty ? "" : "/\(enc)"
         let data = try await get("/repos/\(owner)/\(repo)/contents\(p)")
-        return try JSONDecoder().decode([IDEGitHubFile].self, from: data)
+        if let arr = try? JSONDecoder().decode([IDEGitHubFile].self, from: data) { return arr }
+        if let single = try? JSONDecoder().decode(IDEGitHubFile.self, from: data) { return [single] }
+        return []
     }
-
     public func readFile(owner: String, repo: String, path: String) async throws -> String {
-        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        let data = try await get("/repos/\(owner)/\(repo)/contents/\(encoded)")
+        let enc = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
         struct F: Decodable { let content: String? }
-        let f = try JSONDecoder().decode(F.self, from: data)
+        let f = try JSONDecoder().decode(F.self, from: try await get("/repos/\(owner)/\(repo)/contents/\(enc)"))
         guard let b64 = f.content?.replacingOccurrences(of: "\n", with: "") else { return "" }
         return String(data: Data(base64Encoded: b64) ?? Data(), encoding: .utf8) ?? ""
     }
-
     public func writeFile(owner: String, repo: String, path: String, content: String, message: String) async throws {
         let b64 = Data(content.utf8).base64EncodedString()
-        // Get existing SHA if any
         var sha: String?
-        if let data = try? await get("/repos/\(owner)/\(repo)/contents/\(path)"),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            sha = json["sha"] as? String
-        }
-        var body: [String: Any] = ["message": message, "content": b64]
-        if let sha { body["sha"] = sha }
+        if let d = try? await get("/repos/\(owner)/\(repo)/contents/\(path)"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String:Any] { sha = j["sha"] as? String }
+        var body: [String:Any] = ["message": message, "content": b64]
+        if let s = sha { body["sha"] = s }
         _ = try await put("/repos/\(owner)/\(repo)/contents/\(path)", body: body)
     }
-
     public func createRepo(name: String, isPrivate: Bool = true) async throws -> IDEGitHubRepo {
-        let body: [String: Any] = ["name": name, "private": isPrivate,
-                                   "description": "Ash Tree IDE projects — DART Meadow | Radical Deepscale LLC.",
-                                   "auto_init": true]
-        let data = try await post("/user/repos", body: body)
-        return try JSONDecoder().decode(IDEGitHubRepo.self, from: data)
+        try JSONDecoder().decode(IDEGitHubRepo.self, from: try await post("/user/repos",
+            body: ["name": name, "private": isPrivate, "description": "Ash Tree IDE projects", "auto_init": true]))
     }
-
     public func repoExists(owner: String, repo: String) async -> Bool {
-        guard let data = try? await get("/repos/\(owner)/\(repo)"),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["id"] != nil else { return false }
+        guard let d = try? await get("/repos/\(owner)/\(repo)"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String:Any], j["id"] != nil else { return false }
         return true
     }
-
-    // Private HTTP helpers
     private func get(_ path: String) async throws -> Data {
-        var req = URLRequest(url: URL(string: base + path)!)
-        headers().forEach { req.setValue($1, forHTTPHeaderField: $0) }
-        return try await session.data(for: req).0
+        var r = URLRequest(url: URL(string: base+path)!); headers().forEach { r.setValue($1, forHTTPHeaderField: $0) }
+        return try await session.data(for: r).0
     }
-    private func post(_ path: String, body: [String: Any]) async throws -> Data {
-        var req = URLRequest(url: URL(string: base + path)!)
-        req.httpMethod = "POST"
-        headers().forEach { req.setValue($1, forHTTPHeaderField: $0) }
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return try await session.data(for: req).0
+    private func post(_ path: String, body: [String:Any]) async throws -> Data {
+        var r = URLRequest(url: URL(string: base+path)!); r.httpMethod = "POST"
+        headers().forEach { r.setValue($1, forHTTPHeaderField: $0) }
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await session.data(for: r).0
     }
-    private func put(_ path: String, body: [String: Any]) async throws -> Data {
-        var req = URLRequest(url: URL(string: base + path)!)
-        req.httpMethod = "PUT"
-        headers().forEach { req.setValue($1, forHTTPHeaderField: $0) }
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return try await session.data(for: req).0
+    private func put(_ path: String, body: [String:Any]) async throws -> Data {
+        var r = URLRequest(url: URL(string: base+path)!); r.httpMethod = "PUT"
+        headers().forEach { r.setValue($1, forHTTPHeaderField: $0) }
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await session.data(for: r).0
     }
 }
 
-// MARK: - Auth ViewModel (ArcLake Fruta pattern)
-
 @MainActor
 public final class IDEAuthViewModel: NSObject, ObservableObject {
-
     private var appleAuthController: ASAuthorizationController?
+    private var currentNonce: String = ""
 
-    @Published public var isSignedIn      = false
-    @Published public var isGuest         = false
-    @Published public var githubConnected = false
-    @Published public var username        = ""
-    @Published public var githubUsername  = ""
+    @Published public var isSignedIn = false, isGuest = false, githubConnected = false
+    @Published public var username = "", githubUsername = ""
     @Published public var githubAvatarURL: URL? = nil
-    @Published public var avatarImage: UIImage?  = nil
-    @Published public var appleUserId     = ""
-    @Published public var error: String?  = nil
+    @Published public var avatarImage: UIImage? = nil
+    @Published public var appleUserId = ""
+    @Published public var error: String? = nil
     @Published public var deviceFlow: IDEDeviceFlow?
     @Published public var savedAccounts: [IDESavedAccount] = []
 
-    private let githubClientId = "Ov23li2K0njEqO1WTSdD"
-
-    // ── Launch restore (Fruta pattern — same as ArcLake) ─────────
     public func restoreSession() {
-        // Try GitHub first
         if let pat = KeychainHelper.load(key: "ide_github_pat"), !pat.isEmpty {
-            if let cached = KeychainHelper.load(key: "ide_github_avatar_url"),
-               let url = URL(string: cached) {
+            if let cached = KeychainHelper.load(key: "ide_github_avatar_url"), let url = URL(string: cached) {
                 githubAvatarURL = url
             }
             Task {
@@ -282,226 +179,149 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
                 if let user = try? await IDEGitHubClient.shared.fetchUser() {
                     KeychainHelper.save(key: "ide_github_username", value: user.login)
                     await MainActor.run {
-                        self.githubConnected = true
-                        self.githubUsername  = user.login
-                        self.username        = user.login
-                        self.isSignedIn      = true
+                        self.githubConnected = true; self.githubUsername = user.login
+                        self.username = user.login; self.isSignedIn = true
                     }
-                    if let avatarStr = user.avatarURL {
-                        await fetchAndCacheAvatar(avatarStr)
-                    }
-                    await ensureDefaultRepo(username: user.login)
+                    if let a = user.avatarURL { await self.fetchAndCacheAvatar(a) }
+                    await self.ensureDefaultRepo(username: user.login)
                 }
             }
             let ghUser = KeychainHelper.load(key: "ide_github_username") ?? ""
-            if !ghUser.isEmpty {
-                githubConnected = true; githubUsername = ghUser
-                username = ghUser; isSignedIn = true
-            }
+            if !ghUser.isEmpty { githubConnected=true; githubUsername=ghUser; username=ghUser; isSignedIn=true }
         }
-
-        // Check Apple
         if let uid = KeychainHelper.load(key: "ide_apple_uid"), !uid.isEmpty {
-            let provider = ASAuthorizationAppleIDProvider()
-            provider.getCredentialState(forUserID: uid) { [weak self] state, _ in
+            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: uid) { [weak self] state, _ in
                 DispatchQueue.main.async {
                     if state == .authorized && !(self?.isSignedIn ?? false) {
                         let name = KeychainHelper.load(key: "ide_apple_name") ?? "Apple User"
-                        self?.appleUserId = uid
-                        self?.username    = name
-                        self?.isSignedIn  = true
+                        self?.appleUserId = uid; self?.username = name; self?.isSignedIn = true
                     }
                 }
             }
         }
-
         loadSavedAccounts()
     }
 
-    // ── Sign in with Apple ────────────────────────────────────────
+    // Fix: SHA256 hashed nonce — this was the crash cause
     public func signInWithApple() {
-        let provider  = ASAuthorizationAppleIDProvider()
-        let request   = provider.createRequest()
-        request.requestedScopes = [.fullName, .email]
-        let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        request.nonce = nonce
-
-        let ctrl = ASAuthorizationController(authorizationRequests: [request])
-        ctrl.delegate             = self
-        ctrl.presentationContextProvider = self
-        ctrl.performRequests()
+        currentNonce = randomNonceString()
+        let req = ASAuthorizationAppleIDProvider().createRequest()
+        req.requestedScopes = [.fullName, .email]
+        req.nonce = sha256(currentNonce)  // MUST be SHA256 of raw nonce
+        let ctrl = ASAuthorizationController(authorizationRequests: [req])
+        ctrl.delegate = self; ctrl.presentationContextProvider = self; ctrl.performRequests()
         appleAuthController = ctrl
     }
 
-    public func performExistingAccountSetup() {
-        let apple = ASAuthorizationAppleIDProvider().createRequest()
-        let pw    = ASAuthorizationPasswordProvider().createRequest()
-        let ctrl  = ASAuthorizationController(authorizationRequests: [apple, pw])
-        ctrl.delegate             = self
-        ctrl.presentationContextProvider = self
-        ctrl.performRequests()
-        appleAuthController = ctrl
-    }
-
-    // ── GitHub Device Flow ────────────────────────────────────────
+    // Fix: silently re-auth if token exists — no device flow needed
     public func startGitHubDeviceFlow() async {
+        if let existingPat = KeychainHelper.load(key: "ide_github_pat"), !existingPat.isEmpty {
+            await IDEGitHubClient.shared.setToken(existingPat)
+            if let user = try? await IDEGitHubClient.shared.fetchUser() {
+                KeychainHelper.save(key: "ide_github_username", value: user.login)
+                githubConnected=true; githubUsername=user.login; username=user.login; isSignedIn=true
+                if let a = user.avatarURL { await fetchAndCacheAvatar(a) }
+                loadSavedAccounts(); return
+            }
+        }
+        // No valid token — run new device flow
         do {
             var flow = try await IDEGitHubClient.shared.startDeviceFlow()
-            flow.isPolling = true
-            deviceFlow = flow
-
-            // Copy code + open browser
+            flow.isPolling = true; deviceFlow = flow
             UIPasteboard.general.string = flow.userCode
             await UIApplication.shared.open(flow.verifyURL)
-
-            guard let token = try await IDEGitHubClient.shared.pollDeviceFlow(
-                deviceCode: flow.deviceCode, interval: flow.interval) else {
-                deviceFlow?.error = "Authorization expired. Please try again."
-                deviceFlow?.isPolling = false
-                return
+            guard let token = try await IDEGitHubClient.shared.pollDeviceFlow(deviceCode: flow.deviceCode, interval: flow.interval) else {
+                deviceFlow?.error = "Authorization timed out."; deviceFlow?.isPolling = false; return
             }
-
             await IDEGitHubClient.shared.setToken(token)
             let user = try await IDEGitHubClient.shared.fetchUser()
             KeychainHelper.save(key: "ide_github_username", value: user.login)
-
-            githubConnected = true
-            githubUsername  = user.login
-            username        = user.login
-            isSignedIn      = true
-            deviceFlow      = nil
-
-            if let avatarStr = user.avatarURL {
-                KeychainHelper.save(key: "ide_github_avatar_url", value: avatarStr)
-                await fetchAndCacheAvatar(avatarStr)
-            }
-            loadSavedAccounts()
-            await ensureDefaultRepo(username: user.login)
-
-        } catch {
-            deviceFlow?.error = error.localizedDescription
-            deviceFlow?.isPolling = false
-        }
+            githubConnected=true; githubUsername=user.login; username=user.login; isSignedIn=true; deviceFlow=nil
+            if let a = user.avatarURL { KeychainHelper.save(key: "ide_github_avatar_url", value: a); await fetchAndCacheAvatar(a) }
+            loadSavedAccounts(); await ensureDefaultRepo(username: user.login)
+        } catch { deviceFlow?.error = error.localizedDescription; deviceFlow?.isPolling = false }
     }
 
-    // ── Guest ─────────────────────────────────────────────────────
-    public func continueAsGuest() {
-        isGuest    = true
-        isSignedIn = true
-        username   = "Guest"
+    public func forceNewDeviceFlow() async {
+        await IDEGitHubClient.shared.clearToken()
+        await startGitHubDeviceFlow()
     }
 
-    // ── Sign out ──────────────────────────────────────────────────
+    public func continueAsGuest() { isGuest=true; isSignedIn=true; username="Guest" }
+
     public func signOut() {
-        isSignedIn      = false
-        isGuest         = false
-        githubConnected = false
-        username        = ""
-        githubUsername  = ""
-        githubAvatarURL = nil
-        avatarImage     = nil
-        appleUserId     = ""
+        isSignedIn=false; isGuest=false; githubConnected=false; username=""; githubUsername=""
+        githubAvatarURL=nil; avatarImage=nil; appleUserId=""
         Task { await IDEGitHubClient.shared.clearToken() }
-        ["ide_github_pat","ide_github_username","ide_github_avatar_url",
-         "ide_apple_uid","ide_apple_name"].forEach { KeychainHelper.delete(key: $0) }
+        ["ide_github_pat","ide_github_username","ide_github_avatar_url","ide_apple_uid","ide_apple_name"]
+            .forEach { KeychainHelper.delete(key: $0) }
         loadSavedAccounts()
     }
 
-    // ── Avatar ────────────────────────────────────────────────────
     private func fetchAndCacheAvatar(_ urlStr: String) async {
         guard let url = URL(string: urlStr),
               let data = try? await IDEGitHubClient.shared.fetchAvatar(urlStr: urlStr),
-              let img  = UIImage(data: data) else { return }
-        await MainActor.run {
-            self.avatarImage     = img
-            self.githubAvatarURL = url
-        }
+              let img = UIImage(data: data) else { return }
+        await MainActor.run { self.avatarImage=img; self.githubAvatarURL=url }
         KeychainHelper.save(key: "ide_github_avatar_url", value: urlStr)
     }
 
-    // ── Auto-create private IDE repo on first sign-in ─────────────
     private func ensureDefaultRepo(username: String) async {
-        let repoName = "Ash-Tree-IDE-Projects"
-        let exists = await IDEGitHubClient.shared.repoExists(owner: username, repo: repoName)
-        guard !exists else { return }
-        guard let _ = try? await IDEGitHubClient.shared.createRepo(name: repoName, isPrivate: true) else { return }
-        // Seed README
-        let readme = """
-        # Ash Tree IDE — Project Files
-        **Owner:** @\(username)  ·  © 2025 DART Meadow | Radical Deepscale LLC.
-
-        Ash language scripts created with **Ash Tree IDE** on iOS.
-
-        ## LEATR v2 Syntax
-        ```ash
-        {{env:MyProject}}
-        [[script:hello-v1]]
-
-        (HelloNode):-: {
-          with var (s) {
-            irin ("Data: Hello from Ash!")
-            Maze
-            thenplace var (s) with var (s)
-          }
-          irout ("Result: " placeto (s))
-        }|';'|
-        ```
-        """
-        try? await IDEGitHubClient.shared.writeFile(
-            owner: username, repo: repoName,
-            path: "README.md", content: readme,
+        let r = "Ash-Tree-IDE-Projects"
+        guard !(await IDEGitHubClient.shared.repoExists(owner: username, repo: r)) else { return }
+        guard let _ = try? await IDEGitHubClient.shared.createRepo(name: r, isPrivate: true) else { return }
+        try? await IDEGitHubClient.shared.writeFile(owner: username, repo: r, path: "README.md",
+            content: "# Ash Tree IDE\n© 2025 DART Meadow | Radical Deepscale LLC.",
             message: "Initialize Ash Tree IDE repository")
     }
 
-    // ── Saved accounts ────────────────────────────────────────────
     private func loadSavedAccounts() {
         var accounts: [IDESavedAccount] = []
         if let gh = KeychainHelper.load(key: "ide_github_username"), !gh.isEmpty {
-            let avatarStr = KeychainHelper.load(key: "ide_github_avatar_url")
-            let avatarURL = avatarStr.flatMap { URL(string: $0) }
-            accounts.append(IDESavedAccount(username: gh, provider: "github", avatarURL: avatarURL))
+            let url = KeychainHelper.load(key: "ide_github_avatar_url").flatMap { URL(string: $0) }
+            accounts.append(.init(username: gh, provider: "github", avatarURL: url))
         }
         if let apple = KeychainHelper.load(key: "ide_apple_name"), !apple.isEmpty {
-            accounts.append(IDESavedAccount(username: apple, provider: "apple", avatarURL: nil))
+            accounts.append(.init(username: apple, provider: "apple", avatarURL: nil))
         }
         savedAccounts = accounts
     }
-}
 
-// MARK: - ASAuthorizationControllerDelegate
+    private func randomNonceString(length: Int = 32) -> String {
+        let charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._"
+        var result = ""; var remaining = length
+        while remaining > 0 {
+            var randoms = [UInt8](repeating: 0, count: 16); _ = SecRandomCopyBytes(kSecRandomDefault, randoms.count, &randoms)
+            randoms.forEach { r in
+                guard remaining > 0, r < charset.count else { return }
+                result += String(charset[charset.index(charset.startIndex, offsetBy: Int(r))]); remaining -= 1
+            }
+        }
+        return result
+    }
+    private func sha256(_ input: String) -> String {
+        SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
 
 extension IDEAuthViewModel: ASAuthorizationControllerDelegate {
-    public func authorizationController(controller: ASAuthorizationController,
-                                        didCompleteWithAuthorization authorization: ASAuthorization) {
-        if let cred = authorization.credential as? ASAuthorizationAppleIDCredential {
+    public func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization auth: ASAuthorization) {
+        if let cred = auth.credential as? ASAuthorizationAppleIDCredential {
             let uid = cred.user
-            let name = [cred.fullName?.givenName, cred.fullName?.familyName]
-                .compactMap { $0 }.joined(separator: " ")
-            let displayName = name.isEmpty ? (KeychainHelper.load(key: "ide_apple_name") ?? "Apple User") : name
-            KeychainHelper.save(key: "ide_apple_uid",  value: uid)
-            KeychainHelper.save(key: "ide_apple_name", value: displayName)
-            appleUserId = uid
-            username    = displayName
-            isSignedIn  = true
-            if !githubConnected { loadSavedAccounts() }
+            let name = [cred.fullName?.givenName, cred.fullName?.familyName].compactMap{$0}.joined(separator: " ")
+            let display = name.isEmpty ? (KeychainHelper.load(key: "ide_apple_name") ?? "Apple User") : name
+            KeychainHelper.save(key: "ide_apple_uid", value: uid)
+            KeychainHelper.save(key: "ide_apple_name", value: display)
+            appleUserId=uid; username=display; isSignedIn=true; loadSavedAccounts()
         }
     }
-
-    public func authorizationController(controller: ASAuthorizationController,
-                                        didCompleteWithError error: Error) {
-        if (error as? ASAuthorizationError)?.code != .canceled {
-            self.error = error.localizedDescription
-        }
+    public func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        if (error as? ASAuthorizationError)?.code != .canceled { self.error = error.localizedDescription }
     }
 }
-
-// MARK: - Presentation context
 
 extension IDEAuthViewModel: ASAuthorizationControllerPresentationContextProviding {
     public func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first { $0.isKeyWindow } ?? UIWindow()
+        UIApplication.shared.connectedScenes.compactMap{$0 as? UIWindowScene}.flatMap{$0.windows}.first{$0.isKeyWindow} ?? UIWindow()
     }
 }
