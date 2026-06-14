@@ -311,17 +311,34 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
             Task { @MainActor in
                 if let cred=auth.credential as? ASAuthorizationAppleIDCredential {
                     let uid=cred.user
-                    // Priority: email prefix → full name → cached name → "Apple User"
-                    var display = KeychainHelper.load(key:"ide_apple_name") ?? "Apple User"
-                    // Extract username from email prefix (e.g. "justin" from "justin@icloud.com")
+
+                    // Build display name — Apple only sends email/name on FIRST sign-in
+                    // On repeat sign-ins both are nil, so we load from keychain
+                    var display = KeychainHelper.load(key:"ide_apple_name") ?? ""
+
+                    // First priority: email prefix (e.g. "justin" from "justin@icloud.com")
+                    // Only available on first auth — save permanently to keychain
                     if let email = cred.email, !email.isEmpty {
-                        let emailPrefix = String(email.split(separator:"@").first ?? "")
-                        if !emailPrefix.isEmpty { display = emailPrefix }
+                        let prefix = String(email.split(separator:"@").first ?? "")
+                        if !prefix.isEmpty {
+                            display = prefix
+                            KeychainHelper.save(key:"ide_apple_email_prefix", value:prefix)
+                        }
+                    } else if let saved = KeychainHelper.load(key:"ide_apple_email_prefix"),
+                              !saved.isEmpty {
+                        // Repeat sign-in: restore email prefix from keychain
+                        display = saved
                     }
-                    // Override with full name if provided (first sign-in)
-                    let fullName = [cred.fullName?.givenName, cred.fullName?.familyName]
-                        .compactMap{$0}.joined(separator:" ")
+
+                    // Second priority: full name (also only on first auth)
+                    let givenName  = cred.fullName?.givenName  ?? ""
+                    let familyName = cred.fullName?.familyName ?? ""
+                    let fullName   = [givenName, familyName].filter{!$0.isEmpty}.joined(separator:" ")
                     if !fullName.isEmpty { display = fullName }
+
+                    // Final fallback
+                    if display.isEmpty { display = "Apple User" }
+
                     KeychainHelper.save(key:"ide_apple_uid",  value:uid)
                     KeychainHelper.save(key:"ide_apple_name", value:display)
                     self.appleUserId=uid; self.username=display; self.isSignedIn=true
@@ -379,14 +396,18 @@ public final class IDEAuthViewModel: NSObject, ObservableObject {
     }
 
     public func setActiveAccount(_ provider: String) {
+        // SWITCH active session — never disconnects the other account
         activeAccountProvider = provider
         if provider == "github" {
             let ghUser = KeychainHelper.load(key: "ide_github_username") ?? ""
             if !ghUser.isEmpty { username = ghUser }
         } else if provider == "apple" {
-            let appleUser = KeychainHelper.load(key: "ide_apple_name") ?? "Apple User"
-            username = appleUser
+            // Prefer email prefix, fall back to stored name
+            let prefix = KeychainHelper.load(key: "ide_apple_email_prefix") ?? ""
+            let name   = KeychainHelper.load(key: "ide_apple_name") ?? "Apple User"
+            username = prefix.isEmpty ? name : prefix
         }
+        loadSavedAccounts()  // refresh isActive flags
     }
 
     public func continueAsGuest(){isGuest=true;isSignedIn=true;username="Guest"}
