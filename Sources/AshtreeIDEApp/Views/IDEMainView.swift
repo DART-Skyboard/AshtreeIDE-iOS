@@ -428,20 +428,46 @@ struct IDEDrawerFilesTab: View {
                                 ideVM.openLocalFile(name)
                                 withAnimation { ideVM.showDrawer = false }
                             } label: {
-                                Label(name, systemImage: "doc.text").foregroundColor(themeVM.text)
+                                HStack(spacing: 8) {
+                                    Image(systemName: ideVM.currentFile == name
+                                        ? "doc.text.fill" : "doc.text")
+                                        .foregroundColor(ideVM.currentFile == name
+                                            ? themeVM.accent : themeVM.dim)
+                                    Text(name)
+                                        .foregroundColor(ideVM.currentFile == name
+                                            ? themeVM.accent : themeVM.text)
+                                        .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
+                                    Spacer()
+                                    if ideVM.currentFile == name {
+                                        Circle().fill(themeVM.accent).frame(width:5,height:5)
+                                    }
+                                }
                             }
                         }
                         Button {
                             ideVM.saveLocally()
+                            ideVM.exportFileToDevice = true
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "square.and.arrow.down")
-                                    .foregroundColor(ideVM.isDirty ? themeVM.accent : themeVM.dim)
-                                Text(ideVM.isDirty ? "Save to Device ●" : "Save to Device")
-                                    .foregroundColor(ideVM.isDirty ? themeVM.accent : themeVM.dim)
+                                    .foregroundColor(themeVM.accent)
+                                Text("Save to Device")
+                                    .foregroundColor(themeVM.accent)
                             }
                         }
-                    } header: {
+                    }
+            .fileExporter(
+                isPresented: Binding(
+                    get: { ideVM.exportFileToDevice },
+                    set: { ideVM.exportFileToDevice = $0 }
+                ),
+                document: AshDocument(content: ideVM.sourceCode, filename: ideVM.currentFile),
+                contentType: .plainText,
+                defaultFilename: ideVM.currentFile
+            ) { result in
+                if case .success = result { ideVM.exportFileToDevice = false }
+            }
+            } header: {
                         Text("LOCAL DEVICE FILES").font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(themeVM.dim).kerning(1)
                     }
