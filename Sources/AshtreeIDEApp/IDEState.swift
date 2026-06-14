@@ -39,7 +39,7 @@ public final class IDEState: ObservableObject {
     @Published public var fileSource: FileSource = .examples
 
     public enum DrawerTab: String, CaseIterable {
-        case files = "Files", repos = "Repos", settings = "Settings"
+        case files = "Projects", repos = "Repos", settings = "Settings"
         case profile = "Profile", about = "About"
         public var icon: String {
             switch self {
