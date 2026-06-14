@@ -134,7 +134,7 @@ public final class LEMACEngine {
         while visitCount < total, let (cx, cy, cz) = stack.last {
             let neighbors = dirs.shuffled().compactMap { dir -> (Int,Int,Int, WritableKeyPath<MazeCell,Bool>, WritableKeyPath<MazeCell,Bool>)? in
                 let nx = cx+dir.dx, ny = cy+dir.dy, nz = cz+dir.dz
-                guard nx>=0&&nx<w&&ny>=0&&ny<h&&nz>=0&&nz<d&&!g[nz][ny][nx].visited else { return nil }
+                guard nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d && !g[nz][ny][nx].visited else { return nil }
                 return (nx, ny, nz, dir.wall, dir.opp)
             }
             if let (nx, ny, nz, wall, opp) = neighbors.first {
