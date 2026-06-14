@@ -24,6 +24,11 @@ public final class IDEState: ObservableObject {
     @Published public var currentFile = "untitled.ash"
     @Published public var isDirty = false
     @Published public var exportFileToDevice = false
+    // Files synced to repo — paths that auto-push on every save
+    @Published public var syncedFiles: Set<String> = []
+    // Repo context for sync
+    public var syncRepoOwner: String = ""
+    public var syncRepoName:  String = ""
     @Published public var selectedTab: IDETab = .editor
     @Published public var isCompiling = false
     @Published public var isSaving = false
@@ -140,10 +145,19 @@ public final class IDEState: ObservableObject {
         UserDefaults.standard.set(sourceCode, forKey: key)
         if !localFiles.contains(currentFile) { localFiles.append(currentFile) }
         UserDefaults.standard.set(localFiles, forKey: "ide_local_file_list")
-        UserDefaults.standard.synchronize()  // force immediate write
+        UserDefaults.standard.synchronize()
         isDirty = false
-        // Reload to confirm persistence
         loadLocalFiles()
+        // Auto-sync to repo if this file is toggled for sync
+        let matchedSync = syncedFiles.first { $0.hasSuffix(currentFile) }
+        if let syncPath = matchedSync, !syncRepoOwner.isEmpty, !syncRepoName.isEmpty {
+            let owner = syncRepoOwner; let repo = syncRepoName; let path = syncPath; let src = sourceCode
+            Task {
+                try? await IDEGitHubClient.shared.writeFile(
+                    owner: owner, repo: repo, path: path,
+                    content: src, message: "Ash Tree IDE: auto-sync \(path)")
+            }
+        }
     }
 
     /// Delete a local file
