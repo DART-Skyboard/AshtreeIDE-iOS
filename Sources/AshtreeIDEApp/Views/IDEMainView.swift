@@ -455,19 +455,7 @@ struct IDEDrawerFilesTab: View {
                                     .foregroundColor(themeVM.accent)
                             }
                         }
-                    }
-            .fileExporter(
-                isPresented: Binding(
-                    get: { ideVM.exportFileToDevice },
-                    set: { ideVM.exportFileToDevice = $0 }
-                ),
-                document: AshDocument(content: ideVM.sourceCode, filename: ideVM.currentFile),
-                contentType: .plainText,
-                defaultFilename: ideVM.currentFile
-            ) { result in
-                if case .success = result { ideVM.exportFileToDevice = false }
-            }
-            } header: {
+                    } header: {
                         Text("LOCAL DEVICE FILES").font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(themeVM.dim).kerning(1)
                     }
@@ -476,6 +464,15 @@ struct IDEDrawerFilesTab: View {
             .listStyle(.plain).scrollContentBackground(.hidden)
         }
         .onAppear { ideVM.loadLocalFiles() }
+        .fileExporter(
+            isPresented: Binding(
+                get: { ideVM.exportFileToDevice },
+                set: { ideVM.exportFileToDevice = $0 }
+            ),
+            document: AshDocument(content: ideVM.sourceCode, filename: ideVM.currentFile),
+            contentType: .plainText,
+            defaultFilename: ideVM.currentFile
+        ) { _ in ideVM.exportFileToDevice = false }
     }
 }
 
