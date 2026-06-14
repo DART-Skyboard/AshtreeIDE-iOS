@@ -76,6 +76,13 @@ struct IDEMazeControlsPanel: View {
                         .kerning(1.5)
                     Spacer()
                     Button {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.system(size:12)).foregroundColor(Color(hex:"#4a5568"))
+                    }
+                    Button {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isCollapsed = true }
                     } label: {
                         Image(systemName: "chevron.left")
@@ -160,7 +167,11 @@ struct IDEMazeControlsPanel: View {
                     }
 
                     if showCrypto {
-                        IDECryptologyPanel().transition(.move(edge: .top).combined(with: .opacity))
+                        IDECryptologyView()
+                            .environmentObject(themeVM)
+                            .environmentObject(ideVM)
+                            .frame(maxHeight: 700)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
                 .padding(12)
