@@ -305,9 +305,9 @@ struct IDECryptologyPanel: View {
             if !c.front { wallCount += 1 }
         }}}
         let privateKey = String(format: "%06X-%06X-%06X",
-            entry.x * 65536 + entry.y * 256 + entry.z,
+            entry.0 * 65536 + entry.1 * 256 + entry.2,
             wallCount,
-            exit.x * 65536 + exit.y * 256 + exit.z)
+            exit.0 * 65536 + exit.1 * 256 + exit.2)
         let publicKey  = String(format: "%08X", wallCount &* 0x9E3779B9)
         keyDisplay = "Private: \(privateKey)\nPublic:  \(publicKey)"
     }
