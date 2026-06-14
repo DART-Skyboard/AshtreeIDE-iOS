@@ -431,6 +431,25 @@ struct IDEDrawerFilesTab: View {
 
                 case .local:
                     Section {
+                        // Restore all default example project files
+                        Button {
+                            IDEState.examples.forEach { ex in
+                                let fname = ex.name.lowercased()
+                                    .replacingOccurrences(of: " ", with: "_") + ".ash"
+                                let key = "ide_local_\(fname)"
+                                UserDefaults.standard.set(ex.code, forKey: key)
+                                if !ideVM.localFiles.contains(fname) {
+                                    ideVM.localFiles.append(fname)
+                                }
+                            }
+                            UserDefaults.standard.set(ideVM.localFiles, forKey: "ide_local_file_list")
+                            UserDefaults.standard.synchronize()
+                            ideVM.loadLocalFiles()
+                        } label: {
+                            Label("Restore Default Projects", systemImage: "arrow.counterclockwise")
+                                .foregroundColor(themeVM.dim)
+                        }
+
                         Button {
                             ideVM.newFile()
                             withAnimation { ideVM.showDrawer = false }
