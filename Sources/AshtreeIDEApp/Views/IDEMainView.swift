@@ -590,7 +590,7 @@ struct IDEDrawerFilesTab: View {
                 List {
                     ForEach(ideVM.examples, id: \.name) { ex in
                         Button {
-                            ideVM.loadExample(ex)
+                            ideVM.loadExample(name: ex.name, code: ex.code)
                             withAnimation { ideVM.showDrawer = false }
                         } label: {
                             Label(ex.name, systemImage: ex.icon).foregroundColor(themeVM.text)
