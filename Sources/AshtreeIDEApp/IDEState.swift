@@ -5,7 +5,7 @@ import Combine
 
 public enum IDETab: String, CaseIterable {
     case editor = "Editor", output = "Output", terminal = "Terminal"
-    case files = "Files", maze = "Maze", docs = "Docs", help = "Help"
+    case files = "Files", maze = "Maze", docs = "Docs", help = "Help", help = "Help"
     public var icon: String {
         switch self {
         case .editor:   return "chevron.left.forwardslash.chevron.right"
@@ -14,6 +14,7 @@ public enum IDETab: String, CaseIterable {
         case .files:    return "folder"
         case .maze:     return "puzzlepiece"
         case .docs:     return "book"
+        case .help:     return "questionmark.circle"
         }
     }
 }
