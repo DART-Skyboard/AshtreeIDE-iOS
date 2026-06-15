@@ -430,71 +430,7 @@ struct IDEDrawerFilesTab: View {
                     }
 
                 case .local:
-                    Section {
-                        // Restore all default example project files
-                        Button {
-                            ideVM.examples.forEach { ex in
-                                let fname = ex.name.lowercased()
-                                    .replacingOccurrences(of: " ", with: "_") + ".ash"
-                                let key = "ide_local_\(fname)"
-                                UserDefaults.standard.set(ex.code, forKey: key)
-                                if !ideVM.localFiles.contains(fname) {
-                                    ideVM.localFiles.append(fname)
-                                }
-                            }
-                            UserDefaults.standard.set(ideVM.localFiles, forKey: "ide_local_file_list")
-                            UserDefaults.standard.synchronize()
-                            ideVM.loadLocalFiles()
-                        } label: {
-                            Label("Restore Default Projects", systemImage: "arrow.counterclockwise")
-                                .foregroundColor(themeVM.dim)
-                        }
-
-                        Button {
-                            ideVM.newFile()           // creates unique file + persists immediately
-                            withAnimation { ideVM.showDrawer = false }
-                        } label: {
-                            Label("New Local File", systemImage: "plus.square").foregroundColor(themeVM.accent)
-                        }
-                        ForEach(ideVM.localFiles, id: \.self) { name in
-                            Button {
-                                ideVM.openLocalFile(name)
-                                withAnimation { ideVM.showDrawer = false }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: ideVM.currentFile == name
-                                        ? "doc.text.fill" : "doc.text")
-                                        .foregroundColor(ideVM.currentFile == name
-                                            ? themeVM.accent : themeVM.dim)
-                                    Text(name)
-                                        .foregroundColor(ideVM.currentFile == name
-                                            ? themeVM.accent : themeVM.text)
-                                        .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
-                                    Spacer()
-                                    if ideVM.currentFile == name {
-                                        Circle().fill(themeVM.accent).frame(width:5,height:5)
-                                    }
-                                }
-                            }
-                        }
-                        .onDelete { offsets in
-                            for i in offsets {
-                                let name = ideVM.localFiles[i]
-                                ideVM.deleteLocalFile(name)
-                            }
-                        }
-                        Button {
-                            ideVM.saveLocally()
-                            ideVM.exportFileToDevice = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "square.and.arrow.down")
-                                    .foregroundColor(themeVM.accent)
-                                Text("Save to Device")
-                                    .foregroundColor(themeVM.accent)
-                            }
-                        }
-                    } header: {
+                    IDELocalFilesSection()} header: {
                         Text("LOCAL DEVICE FILES").font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(themeVM.dim).kerning(1)
                     }
@@ -514,6 +450,302 @@ struct IDEDrawerFilesTab: View {
         ) { _ in ideVM.exportFileToDevice = false }
     }
 }
+
+// MARK: - Local Files Section (full featured)
+struct IDELocalFilesSection: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    // Multi-select state
+    @State private var selectMode   = false
+    @State private var selected     = Set<String>()
+
+    // Rename state
+    @State private var renamingFile: String? = nil
+    @State private var renameText   = ""
+
+    // Export state
+    @State private var showExportOptions = false
+    @State private var exportAsZip      = false
+    @State private var exportedZip: Data?  = nil
+    @State private var showZipShare      = false
+    @State private var showIndivExport   = false
+    @State private var exportQueue: [String] = []
+    @State private var exportIdx         = 0
+
+    // Confirm delete
+    @State private var showDeleteConfirm = false
+
+    var body: some View {
+        Section {
+            // ── Toolbar row (normal / select mode) ──────────────
+            if selectMode {
+                // Select mode header
+                HStack {
+                    Button {
+                        if selected.count == ideVM.localFiles.count {
+                            selected.removeAll()
+                        } else {
+                            selected = Set(ideVM.localFiles)
+                        }
+                    } label: {
+                        Image(systemName: selected.count == ideVM.localFiles.count
+                            ? "checkmark.square.fill" : "square")
+                            .foregroundColor(themeVM.accent)
+                        Text(selected.count == ideVM.localFiles.count ? "Deselect All" : "Select All")
+                            .font(.system(size: 11)).foregroundColor(themeVM.accent)
+                    }
+                    Spacer()
+                    Button("Done") {
+                        withAnimation { selectMode = false; selected.removeAll() }
+                    }
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(themeVM.accent)
+                }
+                .padding(.vertical, 4)
+
+                // Action buttons when files are selected
+                if !selected.isEmpty {
+                    HStack(spacing: 8) {
+                        // Export ZIP
+                        Button {
+                            exportAsZip = true
+                            buildAndShareZip()
+                        } label: {
+                            Label("ZIP", systemImage: "archivebox")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(themeVM.accent).cornerRadius(6)
+                        }
+                        // Export individual
+                        Button {
+                            exportQueue = Array(selected)
+                            exportIdx = 0
+                            ideVM.exportFileToDevice = true
+                            ideVM.sourceCode = UserDefaults.standard.string(forKey: "ide_local_\(exportQueue[0])") ?? ""
+                            ideVM.currentFile = exportQueue[0]
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(themeVM.accent)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(themeVM.accent.opacity(0.12)).cornerRadius(6)
+                        }
+                        Spacer()
+                        // Delete selected
+                        Button {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.red)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color.red.opacity(0.12)).cornerRadius(6)
+                        }
+                        .confirmationDialog(
+                            "Delete \(selected.count) file(s)?",
+                            isPresented: $showDeleteConfirm, titleVisibility: .visible
+                        ) {
+                            Button("Delete", role: .destructive) {
+                                selected.forEach { ideVM.deleteLocalFile($0) }
+                                selected.removeAll(); selectMode = false
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        }
+                    }
+                }
+            } else {
+                // Normal mode: restore + new file buttons
+                Button {
+                    ideVM.examples.forEach { ex in
+                        let fname = ex.name.lowercased().replacingOccurrences(of:" ",with:"_") + ".ash"
+                        UserDefaults.standard.set(ex.code, forKey:"ide_local_\(fname)")
+                        if !ideVM.localFiles.contains(fname) { ideVM.localFiles.append(fname) }
+                    }
+                    UserDefaults.standard.set(ideVM.localFiles, forKey:"ide_local_file_list")
+                    UserDefaults.standard.synchronize(); ideVM.loadLocalFiles()
+                } label: {
+                    Label("Restore Default Projects", systemImage:"arrow.counterclockwise")
+                        .foregroundColor(themeVM.dim)
+                }
+
+                Button {
+                    ideVM.newFile()
+                } label: {
+                    Label("New Local File", systemImage:"plus.square").foregroundColor(themeVM.accent)
+                }
+            }
+
+            // ── File rows ────────────────────────────────────────
+            ForEach(ideVM.localFiles, id:\.self) { name in
+                Group {
+                    if renamingFile == name {
+                        // Inline rename field
+                        HStack {
+                            Image(systemName:"pencil").foregroundColor(themeVM.accent)
+                            TextField("Filename", text: $renameText)
+                                .font(.system(size:12,design:.monospaced))
+                                .foregroundColor(themeVM.text)
+                                .onSubmit { commitRename(from: name) }
+                                .autocorrectionDisabled()
+                                .autocapitalization(.none)
+                            Button("Save") { commitRename(from: name) }
+                                .font(.system(size:11,weight:.semibold))
+                                .foregroundColor(themeVM.accent)
+                        }
+                        .padding(.vertical, 2)
+                    } else if selectMode {
+                        // Checkbox row
+                        Button {
+                            if selected.contains(name) { selected.remove(name) }
+                            else { selected.insert(name) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: selected.contains(name)
+                                    ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(selected.contains(name) ? themeVM.accent : themeVM.dim)
+                                Image(systemName: ideVM.currentFile == name ? "doc.text.fill" : "doc.text")
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.dim)
+                                Text(name)
+                                    .font(.system(size:12))
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.text)
+                                    .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        // Normal tap row with long-press
+                        Button {
+                            ideVM.openLocalFile(name)
+                            withAnimation { ideVM.showDrawer = false }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: ideVM.currentFile == name ? "doc.text.fill" : "doc.text")
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.dim)
+                                Text(name)
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.text)
+                                    .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
+                                Spacer()
+                                if ideVM.currentFile == name {
+                                    Circle().fill(themeVM.accent).frame(width:5,height:5)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                            withAnimation { selectMode = true; selected.insert(name) }
+                        })
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role:.destructive) { ideVM.deleteLocalFile(name) }
+                                label: { Label("Delete", systemImage:"trash") }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                renamingFile = name
+                                renameText = String(name.dropLast(name.hasSuffix(".ash") ? 4 : 0))
+                            } label: {
+                                Label("Rename", systemImage:"pencil")
+                            }
+                            .tint(themeVM.accent)
+                        }
+                    }
+                }
+            }
+
+            // ── Save button ──────────────────────────────────────
+            if !selectMode {
+                Button {
+                    ideVM.saveLocally(); ideVM.exportFileToDevice = true
+                } label: {
+                    HStack(spacing:6) {
+                        Image(systemName:"square.and.arrow.down").foregroundColor(themeVM.accent)
+                        Text("Save to Device").foregroundColor(themeVM.accent)
+                    }
+                }
+            }
+        } header: {
+            Text("LOCAL DEVICE FILES").font(.system(size:9,weight:.semibold,design:.monospaced))
+                .foregroundColor(themeVM.dim).kerning(1)
+        }
+        // ZIP share sheet
+        .sheet(isPresented: $showZipShare) {
+            if let zipData = exportedZip {
+                ShareSheet(items: [zipData as Any])
+            }
+        }
+    }
+
+    // Commit inline rename
+    func commitRename(from oldName: String) {
+        var newName = renameText.trimmingCharacters(in: .whitespaces)
+        if !newName.hasSuffix(".ash") { newName += ".ash" }
+        guard !newName.isEmpty, newName != oldName, !ideVM.localFiles.contains(newName) else {
+            renamingFile = nil; return
+        }
+        let content = UserDefaults.standard.string(forKey:"ide_local_\(oldName)") ?? ""
+        UserDefaults.standard.set(content, forKey:"ide_local_\(newName)")
+        UserDefaults.standard.removeObject(forKey:"ide_local_\(oldName)")
+        if let idx = ideVM.localFiles.firstIndex(of: oldName) {
+            ideVM.localFiles[idx] = newName
+        }
+        UserDefaults.standard.set(ideVM.localFiles, forKey:"ide_local_file_list")
+        UserDefaults.standard.synchronize()
+        if ideVM.currentFile == oldName { ideVM.currentFile = newName }
+        renamingFile = nil
+        ideVM.loadLocalFiles()
+    }
+
+    // Build ZIP from selected files and share
+    func buildAndShareZip() {
+        var zip = Data()
+        var centralDir = Data()
+        var offsets = [UInt32]()
+
+        func u16(_ v: Int) -> Data { var n = UInt16(v); return Data(bytes:&n,count:2) }
+        func u32(_ v: Int) -> Data { var n = UInt32(v); return Data(bytes:&n,count:4) }
+
+        for fname in selected {
+            let content = UserDefaults.standard.string(forKey:"ide_local_\(fname)") ?? ""
+            let fileData = Data(content.utf8)
+            let nameBytes = Data(fname.utf8)
+            let crc: UInt32 = {
+                var c: UInt32 = 0xFFFFFFFF
+                var t=[UInt32](repeating:0,count:256)
+                for i in 0..<256{var v=UInt32(i);for _ in 0..<8{v=(v&1) != 0 ? (v>>1)^0xEDB88320 : v>>1};t[i]=v}
+                for b in fileData{c=(c>>8)^t[Int((c^UInt32(b))&0xFF)]};return c^0xFFFFFFFF
+            }()
+            let offset = UInt32(zip.count); offsets.append(offset)
+            var lh=Data(); lh += Data([0x50,0x4B,0x03,0x04])
+            lh += u16(20);lh += u16(0);lh += u16(0);lh += u16(0);lh += u16(0)
+            lh += u32(Int(crc));lh += u32(fileData.count);lh += u32(fileData.count)
+            lh += u16(nameBytes.count);lh += u16(0);lh += nameBytes;lh += fileData
+            zip += lh
+            var cd=Data(); cd += Data([0x50,0x4B,0x01,0x02])
+            cd += u16(20);cd += u16(20);cd += u16(0);cd += u16(0);cd += u16(0);cd += u16(0);cd += u16(0)
+            cd += u32(Int(crc));cd += u32(fileData.count);cd += u32(fileData.count)
+            cd += u16(nameBytes.count);cd += u16(0);cd += u16(0);cd += u16(0);cd += u16(0);cd += u32(0)
+            cd += u32(Int(offset));cd += nameBytes
+            centralDir += cd
+        }
+        let cdOffset=UInt32(zip.count),cdSize=UInt32(centralDir.count); zip += centralDir
+        var eocd=Data(); eocd += Data([0x50,0x4B,0x05,0x06])
+        eocd += u16(0);eocd += u16(0);eocd += u16(selected.count);eocd += u16(selected.count)
+        eocd += u32(Int(cdSize));eocd += u32(Int(cdOffset));eocd += u16(0); zip += eocd
+        exportedZip = zip
+        showZipShare = true
+    }
+}
+
+// UIActivityViewController wrapper for ZIP sharing
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
 
 struct IDEDrawerReposTab: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
