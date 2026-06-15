@@ -249,7 +249,7 @@ struct IDESideDrawer: View {
             // Content
             switch ideVM.drawerTab {
             case .files:    IDEDrawerFilesTab()
-            case .repos:    IDEDrawerReposTab()
+            case .repos:    IDEDrawerReposTab2()
             case .settings: IDEDrawerSettingsTab()
             case .profile:  IDEDrawerProfileTab()
             case .about:    IDEDrawerAboutTab()
@@ -329,129 +329,361 @@ struct IDEDrawerFilesTab: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
 
+    // Multi-select state
+    @State private var selectMode   = false
+    @State private var selectedFiles: Set<String> = []
+
+    // Rename state
+    @State private var renamingFile: String? = nil
+    @State private var renameText   = ""
+
+    // Export
+    @State private var showExportOptions  = false
+    @State private var showZipExporter    = false
+    @State private var showFolderExporter = false
+    @State private var zipData: Data?     = nil
+
     var body: some View {
         VStack(spacing: 0) {
             // Source picker
             Picker("Source", selection: $ideVM.fileSource) {
                 ForEach(IDEState.FileSource.allCases, id: \.self) { s in
-                    Label(s.rawValue, systemImage: s.icon).tag(s)
+                    Text(s.rawValue).tag(s)
                 }
-            }.pickerStyle(.segmented).padding(10)
-            .background(themeVM.surface)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 14).padding(.vertical, 10)
 
-            List {
-                switch ideVM.fileSource {
-                case .examples:
+            // Multi-select action bar (visible in select mode)
+            if selectMode {
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        selectMode = false; selectedFiles = []
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(themeVM.dim)
+
+                    Spacer()
+
+                    Text("\(selectedFiles.count) selected")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundColor(themeVM.accent)
+
+                    Spacer()
+
+                    // Export button
+                    if !selectedFiles.isEmpty {
+                        Button {
+                            showExportOptions = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 13))
+                                .foregroundColor(themeVM.accent)
+                        }
+                        .confirmationDialog("Export Files", isPresented: $showExportOptions) {
+                            Button("Export as ZIP") {
+                                buildZip()
+                                showZipExporter = true
+                            }
+                            Button("Export Files Individually") {
+                                showFolderExporter = true
+                            }
+                            Button("Delete Selected", role: .destructive) {
+                                for name in selectedFiles { ideVM.deleteLocalFile(name) }
+                                selectedFiles = []; selectMode = false
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        }
+
+                        // Delete selected
+                        Button {
+                            for name in selectedFiles { ideVM.deleteLocalFile(name) }
+                            selectedFiles = []; selectMode = false
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 13))
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .background(Color(hex: "#161b22"))
+            }
+
+            if ideVM.fileSource == .local {
+                // ── Local device files ──────────────────────────────
+                List {
                     Section {
+                        // Restore defaults
+                        Button {
+                            ideVM.examples.forEach { ex in
+                                let fname = ex.name.lowercased()
+                                    .replacingOccurrences(of: " ", with: "_") + ".ash"
+                                UserDefaults.standard.set(ex.code, forKey: "ide_local_\(fname)")
+                                if !ideVM.localFiles.contains(fname) { ideVM.localFiles.append(fname) }
+                            }
+                            UserDefaults.standard.set(ideVM.localFiles, forKey: "ide_local_file_list")
+                            UserDefaults.standard.synchronize(); ideVM.loadLocalFiles()
+                        } label: {
+                            Label("Restore Default Projects", systemImage: "arrow.counterclockwise")
+                                .foregroundColor(themeVM.dim)
+                        }
+
+                        // New file
                         Button {
                             ideVM.newFile()
                             withAnimation { ideVM.showDrawer = false }
                         } label: {
-                            Label("New Project", systemImage: "folder.badge.plus").foregroundColor(themeVM.accent)
+                            Label("New Local File", systemImage: "plus.square")
+                                .foregroundColor(themeVM.accent)
                         }
-                        ForEach(ideVM.examples, id: \.name) { ex in
-                            Button {
-                                ideVM.loadExample(ex.code, name: ex.name.lowercased().replacingOccurrences(of: " ", with: "_"))
-                                withAnimation { ideVM.showDrawer = false }
-                            } label: {
-                                Label(ex.name, systemImage: ex.icon).foregroundColor(themeVM.text)
-                            }
-                        }
-                    } header: {
-                        Text("EXAMPLE PROJECTS").font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundColor(themeVM.dim).kerning(1)
-                    }
 
-                case .repository:
-                    // Show repo files
-                    if ideVM.isLoadingFiles {
-                        HStack { Spacer(); ProgressView().tint(themeVM.accent); Spacer() }.padding()
-                    } else if let repo = ideVM.currentRepo {
-                        Section {
-                            if !ideVM.currentPath.isEmpty {
-                                Button {
-                                    let parent = String(ideVM.currentPath.split(separator: "/").dropLast().joined(separator: "/"))
-                                    Task { await ideVM.loadFiles(repo: repo, path: parent) }
-                                } label: {
-                                    Label(".. (up)", systemImage: "arrow.up.doc").foregroundColor(themeVM.dim)
+                        // Select all / deselect all (only in select mode)
+                        if selectMode {
+                            Button {
+                                if selectedFiles.count == ideVM.localFiles.count {
+                                    selectedFiles = []
+                                } else {
+                                    selectedFiles = Set(ideVM.localFiles)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: selectedFiles.count == ideVM.localFiles.count
+                                        ? "checkmark.square.fill" : "square")
+                                        .foregroundColor(themeVM.accent)
+                                    Text(selectedFiles.count == ideVM.localFiles.count
+                                        ? "Deselect All" : "Select All")
+                                        .foregroundColor(themeVM.text)
                                 }
                             }
-                            ForEach(ideVM.repoFiles, id: \.path) { file in
+                        }
+                    }
+
+                    Section {
+                        ForEach(ideVM.localFiles, id: \.self) { name in
+                            // Inline rename mode
+                            if renamingFile == name {
+                                HStack {
+                                    Image(systemName: "pencil")
+                                        .foregroundColor(themeVM.accent).font(.system(size: 12))
+                                    TextField("Filename", text: $renameText)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundColor(themeVM.accent)
+                                        .autocorrectionDisabled().autocapitalization(.none)
+                                        .onSubmit { commitRename(from: name) }
+                                    Button("Save") { commitRename(from: name) }
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(themeVM.accent)
+                                    Button("✕") { renamingFile = nil }
+                                        .font(.system(size: 11)).foregroundColor(.red)
+                                }
+                            } else {
+                                // Normal row — tap to open, long-press to enter select mode
                                 Button {
-                                    if file.type == "dir" {
-                                        Task { await ideVM.loadFiles(repo: repo, path: file.path) }
+                                    if selectMode {
+                                        if selectedFiles.contains(name) {
+                                            selectedFiles.remove(name)
+                                        } else {
+                                            selectedFiles.insert(name)
+                                        }
                                     } else {
-                                        Task { await ideVM.openFile(file); withAnimation { ideVM.showDrawer = false } }
+                                        ideVM.openLocalFile(name)
+                                        withAnimation { ideVM.showDrawer = false }
                                     }
                                 } label: {
-                                    HStack {
-                                        Image(systemName: file.type == "dir" ? "folder.fill" : (file.name.hasSuffix(".ash") ? "chevron.left.forwardslash.chevron.right" : "doc"))
-                                            .foregroundColor(file.type == "dir" ? themeVM.accent : (file.name.hasSuffix(".ash") ? Color(hex: "#00ffcc") : themeVM.dim))
-                                        Text(file.name).font(.system(size: 12, design: file.name.hasSuffix(".ash") ? .monospaced : .default))
-                                            .foregroundColor(themeVM.text)
+                                    HStack(spacing: 8) {
+                                        // Multi-select checkbox
+                                        if selectMode {
+                                            Image(systemName: selectedFiles.contains(name)
+                                                ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(selectedFiles.contains(name)
+                                                    ? themeVM.accent : themeVM.dim)
+                                                .font(.system(size: 14))
+                                        }
+                                        Image(systemName: ideVM.currentFile == name
+                                            ? "doc.text.fill" : "doc.text")
+                                            .foregroundColor(ideVM.currentFile == name
+                                                ? themeVM.accent : themeVM.dim)
+                                        Text(name)
+                                            .foregroundColor(ideVM.currentFile == name
+                                                ? themeVM.accent : themeVM.text)
+                                            .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
+                                            .font(.system(size: 13))
                                         Spacer()
-                                        // Sync toggle — only for .ash files
-                                        if file.type != "dir" && file.name.hasSuffix(".ash") {
-                                            Toggle("", isOn: Binding(
-                                                get: { ideVM.syncedFiles.contains(file.path) },
-                                                set: { on in
-                                                    if on { ideVM.syncedFiles.insert(file.path) }
-                                                    else  { ideVM.syncedFiles.remove(file.path) }
-                                                }
-                                            ))
-                                            .labelsHidden()
-                                            .tint(themeVM.accent)
-                                            .scaleEffect(0.75)
+                                        if ideVM.currentFile == name && !selectMode {
+                                            Circle().fill(themeVM.accent).frame(width:5,height:5)
                                         }
                                     }
                                 }
+                                .buttonStyle(.plain)
+                                .contentShape(Rectangle())
+                                .onLongPressGesture {
+                                    withAnimation { selectMode = true; selectedFiles.insert(name) }
+                                }
+                                // Swipe left → Delete
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        ideVM.deleteLocalFile(name)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                                // Swipe right → Rename
+                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                    Button {
+                                        let base = name.hasSuffix(".ash")
+                                            ? String(name.dropLast(4)) : name
+                                        renameText  = base
+                                        renamingFile = name
+                                    } label: {
+                                        Label("Rename", systemImage: "pencil")
+                                    }
+                                    .tint(themeVM.accent)
+                                }
                             }
-                        } header: {
-                            Text("\(repo.name)\(ideVM.currentPath.isEmpty ? "" : "/\(ideVM.currentPath)")")
-                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                .foregroundColor(themeVM.dim).kerning(1)
                         }
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName:"folder.badge.questionmark")
-                                .font(.system(size:32)).foregroundColor(themeVM.dim.opacity(0.3))
-                            Text("Open a repository from the Repos tab")
-                                .font(.system(size:11)).foregroundColor(themeVM.dim)
-                                .multilineTextAlignment(.center)
-                            Button("Go to Repos") {
-                                ideVM.drawerTab = .repos
-                                Task { await ideVM.loadRepos() }
-                            }
-                            .font(.system(size:10,weight:.semibold,design:.monospaced))
-                            .foregroundColor(themeVM.accent)
+                        .onDelete { offsets in
+                            for i in offsets { ideVM.deleteLocalFile(ideVM.localFiles[i]) }
                         }
-                        .frame(maxWidth:.infinity)
-                        .padding(.top,30)
-                    }
-
-                case .local:
-                    IDELocalFilesSection()} header: {
-                        Text("LOCAL DEVICE FILES").font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    } header: {
+                        Text("LOCAL DEVICE FILES")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(themeVM.dim).kerning(1)
                     }
+
+                    // Save to device
+                    Section {
+                        Button {
+                            ideVM.saveLocally()
+                            ideVM.exportFileToDevice = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.and.arrow.down")
+                                    .foregroundColor(themeVM.accent)
+                                Text("Save to Device")
+                                    .foregroundColor(themeVM.accent)
+                            }
+                        }
+                    }
                 }
+                .listStyle(.plain).scrollContentBackground(.hidden)
+                .onAppear { ideVM.loadLocalFiles() }
+                .fileExporter(
+                    isPresented: Binding(
+                        get: { ideVM.exportFileToDevice },
+                        set: { ideVM.exportFileToDevice = $0 }
+                    ),
+                    document: AshDocument(content: ideVM.sourceCode, filename: ideVM.currentFile),
+                    contentType: .plainText,
+                    defaultFilename: ideVM.currentFile
+                ) { _ in ideVM.exportFileToDevice = false }
+                // ZIP export for multi-select
+                .fileExporter(
+                    isPresented: $showZipExporter,
+                    document: zipData.map { ZipDocument(data: $0) } ?? ZipDocument(data: Data()),
+                    contentType: .zip,
+                    defaultFilename: "ash_export.zip"
+                ) { _ in showZipExporter = false; zipData = nil }
+
+            } else if ideVM.fileSource == .examples {
+                // ── Examples ─────────────────────────────────────────
+                List {
+                    ForEach(ideVM.examples, id: \.name) { ex in
+                        Button {
+                            ideVM.loadExample(ex)
+                            withAnimation { ideVM.showDrawer = false }
+                        } label: {
+                            Label(ex.name, systemImage: ex.icon).foregroundColor(themeVM.text)
+                        }
+                    }
+                }
+                .listStyle(.plain).scrollContentBackground(.hidden)
+
+            } else {
+                // ── Repository ───────────────────────────────────────
+                IDEDrawerRepoFilesTab()
             }
-            .listStyle(.plain).scrollContentBackground(.hidden)
         }
-        .onAppear { ideVM.loadLocalFiles() }
-        .fileExporter(
-            isPresented: Binding(
-                get: { ideVM.exportFileToDevice },
-                set: { ideVM.exportFileToDevice = $0 }
-            ),
-            document: AshDocument(content: ideVM.sourceCode, filename: ideVM.currentFile),
-            contentType: .plainText,
-            defaultFilename: ideVM.currentFile
-        ) { _ in ideVM.exportFileToDevice = false }
+    }
+
+    // Build ZIP from selected files
+    private func buildZip() {
+        var entries: [(name: String, data: Data)] = []
+        for fname in selectedFiles {
+            let content = UserDefaults.standard.string(forKey: "ide_local_\(fname)") ?? ""
+            entries.append((name: fname, data: Data(content.utf8)))
+        }
+        zipData = buildRawZip(entries: entries)
+    }
+
+    private func buildRawZip(entries: [(name: String, data: Data)]) -> Data? {
+        var zip = Data(); var cd = Data(); var offsets = [UInt32]()
+        func u16(_ v: Int) -> Data { var n = UInt16(v); return Data(bytes: &n, count: 2) }
+        func u32(_ v: Int) -> Data { var n = UInt32(v); return Data(bytes: &n, count: 4) }
+        func crc32(_ d: Data) -> UInt32 {
+            var c: UInt32 = 0xFFFFFFFF; var t = [UInt32](repeating:0,count:256)
+            for i in 0..<256 { var v = UInt32(i); for _ in 0..<8 { v = (v&1) != 0 ? (v>>1)^0xEDB88320 : v>>1 }; t[i]=v }
+            for b in d { c = (c>>8)^t[Int((c^UInt32(b))&0xFF)] }; return c^0xFFFFFFFF
+        }
+        for e in entries {
+            let nb=Data(e.name.utf8); let cr=crc32(e.data); offsets.append(UInt32(zip.count))
+            var lh=Data([0x50,0x4B,0x03,0x04]); lh+=u16(20);lh+=u16(0);lh+=u16(0);lh+=u16(0);lh+=u16(0)
+            lh+=u32(Int(cr));lh+=u32(e.data.count);lh+=u32(e.data.count);lh+=u16(nb.count);lh+=u16(0);lh+=nb;lh+=e.data
+            zip+=lh
+            var ce=Data([0x50,0x4B,0x01,0x02]);ce+=u16(20);ce+=u16(20);ce+=u16(0);ce+=u16(0);ce+=u16(0);ce+=u16(0);ce+=u16(0)
+            ce+=u32(Int(cr));ce+=u32(e.data.count);ce+=u32(e.data.count);ce+=u16(nb.count);ce+=u16(0);ce+=u16(0);ce+=u16(0);ce+=u16(0)
+            ce+=u32(0);ce+=u32(Int(offsets.last!));ce+=nb; cd+=ce
+        }
+        let cdo=UInt32(zip.count); let cds=UInt32(cd.count); zip+=cd
+        var eocd=Data([0x50,0x4B,0x05,0x06]);eocd+=u16(0);eocd+=u16(0);eocd+=u16(entries.count);eocd+=u16(entries.count)
+        eocd+=u32(Int(cds));eocd+=u32(Int(cdo));eocd+=u16(0); zip+=eocd
+        return zip
+    }
+
+    private func commitRename(from oldName: String) {
+        var newName = renameText.trimmingCharacters(in: .whitespaces)
+        if newName.isEmpty { renamingFile = nil; return }
+        if !newName.hasSuffix(".ash") { newName += ".ash" }
+        guard newName != oldName else { renamingFile = nil; return }
+        // Copy content to new key, remove old
+        if let content = UserDefaults.standard.string(forKey: "ide_local_\(oldName)") {
+            UserDefaults.standard.set(content, forKey: "ide_local_\(newName)")
+        }
+        UserDefaults.standard.removeObject(forKey: "ide_local_\(oldName)")
+        if let i = ideVM.localFiles.firstIndex(of: oldName) { ideVM.localFiles[i] = newName }
+        UserDefaults.standard.set(ideVM.localFiles, forKey: "ide_local_file_list")
+        UserDefaults.standard.synchronize()
+        if ideVM.currentFile == oldName { ideVM.currentFile = newName }
+        ideVM.loadLocalFiles()
+        renamingFile = nil
     }
 }
 
-// MARK: - Local Files Section (full featured)
+// FileDocument for ZIP export
+import UniformTypeIdentifiers
+
+struct ZipDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.zip] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+// Sub-view for repo files (extracted to keep IDEDrawerFilesTab manageable)
+struct IDEDrawerRepoFilesTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    var body: some View {
+        IDEDrawerReposTab2()
+    }
+}
+
+
 struct IDELocalFilesSection: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
@@ -747,7 +979,7 @@ struct ShareSheet: UIViewControllerRepresentable {
 }
 
 
-struct IDEDrawerReposTab: View {
+struct IDEDrawerReposTab2: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
 
