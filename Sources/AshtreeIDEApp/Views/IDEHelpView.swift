@@ -132,7 +132,7 @@ struct IDEHelpItem {
     let gesture: String?
     let headline: String
     let detail: String
-    init(_ headline: String, detail: String, gesture: String? = nil) {
+    init(_ headline: String, gesture: String? = nil, detail: String) {
         self.gesture = gesture; self.headline = headline; self.detail = detail
     }
 }
