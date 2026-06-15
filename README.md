@@ -1,7 +1,7 @@
 # Ash Tree IDE — iOS
 
 **LEATR v2 · Lead Edge Ash Tree Reflex**  
-© 2025 DART Meadow | Radical Deepscale LLC.  
+© 2026 DART Meadow | Radical Deepscale
 Author: Justin Craig Venable
 
 ---
