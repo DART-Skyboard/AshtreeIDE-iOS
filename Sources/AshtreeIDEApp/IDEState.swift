@@ -84,19 +84,21 @@ public final class IDEState: ObservableObject {
     }
 
     public func newFile() {
-        // Generate unique filename — never overwrite existing files
-        var base = "untitled"; var n = 1; var fname = base + ".ash"
-        while localFiles.contains(fname) || UserDefaults.standard.string(forKey:"ide_local_\(fname)") != nil {
-            fname = "\(base)_\(n).ash"; n += 1
+        // Generate unique filename — check both in-memory list AND persisted keys
+        var n = 1; var fname = "untitled.ash"
+        while localFiles.contains(fname) {
+            fname = "untitled_\(n).ash"; n += 1
         }
-        sourceCode  = "// \(fname)\n// Ash Edge Language · LEATR v2\n{{env:MyProject}}\n[[script:new-script]]\n\n"
+        let initialContent = "// \(fname)\n// Ash Edge Language · LEATR v2\n{{env:MyProject}}\n[[script:new-script]]\n\n"
+        sourceCode  = initialContent
         currentFile = fname
         isDirty     = false
-        // Immediately persist so the file survives app restart
-        UserDefaults.standard.set(sourceCode, forKey: "ide_local_\(fname)")
-        if !localFiles.contains(fname) { localFiles.append(fname) }
+        // Persist immediately — guaranteed unique name
+        UserDefaults.standard.set(initialContent, forKey: "ide_local_\(fname)")
+        localFiles.append(fname)
         UserDefaults.standard.set(localFiles, forKey: "ide_local_file_list")
         UserDefaults.standard.synchronize()
+        // Don't close drawer — user stays in local tab to see their new file
     }
 
     // MARK: - GitHub
