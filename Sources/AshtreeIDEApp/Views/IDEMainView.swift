@@ -159,6 +159,7 @@ struct IDETabContent: View {
                 case .files:    IDEFilesView()
                 case .maze:     IDEMazeView()
                 case .docs:     IDEDocsView()
+                case .help:     IDEHelpView().environmentObject(themeVM)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
