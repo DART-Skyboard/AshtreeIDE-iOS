@@ -274,7 +274,7 @@ int main() {
 // \(node.name)
 // \(projectName) · Ash Edge Language · LEATR v2
 {{env:\(projectName.replacingOccurrences(of:" ",with:""))}}
-[[script:\(node.name.replacingOccurrences(of:".ash",""))]]
+[[script:\(node.name.replacingOccurrences(of:".ash",with:""))]]
 [poly: data-matrix]
 
 (MainNode):-: {
