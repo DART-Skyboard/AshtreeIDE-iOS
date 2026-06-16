@@ -823,6 +823,8 @@ struct ShareSheet: UIViewControllerRepresentable {
 struct IDEDrawerReposTab2: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
+    @State private var previewFile: IDEGitHubFile? = nil
+    @State private var showPreview = false
 
     var body: some View {
         VStack(spacing: 0) {
