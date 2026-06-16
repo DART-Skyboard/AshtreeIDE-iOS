@@ -11,6 +11,12 @@
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>LSRequiresIPhoneOS</key><true/>
+
+    <!-- Export Compliance: app uses only standard iOS encryption (CryptoKit/TLS).
+         Setting this to NO permanently bypasses the App Store Connect questionnaire.
+         Reference: https://developer.apple.com/documentation/bundleresources/information_property_list/itsappusesnonexemptencryption -->
+    <key>ITSAppUsesNonExemptEncryption</key><false/>
+
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key>
     <array>
