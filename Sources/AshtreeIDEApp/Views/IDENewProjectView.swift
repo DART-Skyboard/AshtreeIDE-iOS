@@ -165,38 +165,24 @@ struct IDENewProjectSheet: View {
     }
 
     private func createProject() {
-        // Build filename
-        let base: String
-        if !projectName.trimmingCharacters(in:.whitespaces).isEmpty {
-            base = projectName.trimmingCharacters(in:.whitespaces)
-                .replacingOccurrences(of:" ", with:"_")
-                .filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
-        } else {
-            base = selectedEnv.id == "ash" ? "untitled" : selectedEnv.id + "_project"
-        }
+        let rawName = projectName.trimmingCharacters(in:.whitespaces)
+        let projName = rawName.isEmpty
+            ? (selectedEnv.id == "ash" ? "My Project" : selectedEnv.name + " Project")
+            : rawName
 
-        // Ensure unique filename
-        var fname = base + selectedEnv.ext
-        var n = 1
-        let ud = UserDefaults.standard
-        while ideVM.localFiles.contains(fname) || ud.string(forKey:"ide_local_\(fname)") != nil {
-            fname = "\(base)_\(n)\(selectedEnv.ext)"; n += 1
-        }
-
-        // Set the active language environment in the store
+        // Set the active language environment
         langStore.setEnv(selectedEnv)
 
-        // Load template into editor
-        ideVM.sourceCode  = selectedEnv.templateCode
-        ideVM.currentFile = fname
-        ideVM.isDirty     = false
+        // Create project in the project store (handles file templates + persistence)
+        let proj = IDEProjectStore.shared.createProject(name: projName, language: selectedEnv.id)
 
-        // Persist immediately
-        ud.set(selectedEnv.templateCode, forKey:"ide_local_\(fname)")
-        if !ideVM.localFiles.contains(fname) { ideVM.localFiles.append(fname) }
-        ud.set(ideVM.localFiles, forKey:"ide_local_file_list")
-        ud.synchronize()
-        ideVM.loadLocalFiles()
+        // Load the first file into the editor
+        if let firstFile = proj.files.first(where:{!$0.isFolder}) {
+            let content = IDEProjectStore.shared.readFile(in: proj.id, path: firstFile.name)
+            ideVM.sourceCode  = content
+            ideVM.currentFile = firstFile.name
+            ideVM.isDirty     = false
+        }
 
         isPresented = false
     }
