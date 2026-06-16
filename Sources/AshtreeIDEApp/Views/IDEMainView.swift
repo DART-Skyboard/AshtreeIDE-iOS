@@ -327,8 +327,12 @@ final class IDEStateShared {
 // MARK: - Drawer Tabs Content
 
 struct IDEDrawerFilesTab: View {
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-    @EnvironmentObject var ideVM:   IDEState
+    @EnvironmentObject var themeVM:   IDEThemeViewModel
+    @EnvironmentObject var ideVM:     IDEState
+    @EnvironmentObject var langStore: IDELanguageStore
+
+    // New project sheet
+    @State private var showNewProject = false
 
     // Multi-select state
     @State private var selectMode   = false
@@ -415,6 +419,11 @@ struct IDEDrawerFilesTab: View {
                 // ── Local device files ──────────────────────────────
                 List {
                     Section {
+                        // Active language env badge
+                        IDELangEnvBadge()
+                            .environmentObject(langStore)
+                            .padding(.vertical,2)
+
                         // Restore defaults
                         Button {
                             ideVM.examples.forEach { ex in
@@ -431,12 +440,34 @@ struct IDEDrawerFilesTab: View {
                         }
 
                         // New file
+                        // New Project — opens language picker sheet
                         Button {
-                            ideVM.newFile()
-                            withAnimation { ideVM.showDrawer = false }
+                            showNewProject = true
                         } label: {
-                            Label("New Local File", systemImage: "plus.square")
-                                .foregroundColor(themeVM.accent)
+                            HStack(spacing:8) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius:6)
+                                        .fill(Color(hex:langStore.activeEnv.color).opacity(0.15))
+                                        .frame(width:28,height:28)
+                                    Image(systemName:"plus.square.fill")
+                                        .font(.system(size:14))
+                                        .foregroundColor(Color(hex:langStore.activeEnv.color))
+                                }
+                                VStack(alignment:.leading,spacing:1) {
+                                    Text("New Project")
+                                        .font(.system(size:12,weight:.semibold))
+                                        .foregroundColor(Color(hex:langStore.activeEnv.color))
+                                    Text(langStore.activeEnv.name + " · " + langStore.activeEnv.ext)
+                                        .font(.system(size:9,design:.monospaced))
+                                        .foregroundColor(Color(hex:"#4a5568"))
+                                }
+                            }
+                        }
+                        .sheet(isPresented: $showNewProject) {
+                            IDENewProjectSheet(isPresented: $showNewProject)
+                                .environmentObject(themeVM)
+                                .environmentObject(ideVM)
+                                .environmentObject(langStore)
                         }
 
                         // Select all / deselect all (only in select mode)
