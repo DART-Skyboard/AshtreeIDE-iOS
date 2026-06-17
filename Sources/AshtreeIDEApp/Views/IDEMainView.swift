@@ -870,10 +870,119 @@ struct IDEDrawerReposTab2: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
+            } else if let selectedRepo = ideVM.currentRepo {
+                // ── File browser for selected repo ─────────────────
+                VStack(spacing: 0) {
+                    // Back button + repo name
+                    HStack {
+                        Button {
+                            ideVM.currentRepo = nil
+                            ideVM.repoFiles   = []
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("Repos")
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            .foregroundColor(themeVM.accent)
+                        }
+                        Spacer()
+                        Text(selectedRepo.name)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(themeVM.text)
+                        Spacer()
+                        if ideVM.isLoadingFiles {
+                            ProgressView().scaleEffect(0.7).tint(themeVM.accent)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color(hex: "#161b22"))
+
+                    // Breadcrumb path
+                    if !ideVM.currentPath.isEmpty {
+                        HStack {
+                            Button("/ root") {
+                                Task { await ideVM.loadFiles(repo: selectedRepo, path: "") }
+                            }
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(themeVM.dim)
+                            Text("/")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(themeVM.dim)
+                            Text(ideVM.currentPath)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(themeVM.accent)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 4)
+                    }
+
+                    List(ideVM.repoFiles, id: \.path) { file in
+                        Button {
+                            let ext = (file.name as NSString).pathExtension.lowercased()
+                            let previewExts = ["png","jpg","jpeg","gif","webp","svg",
+                                               "pdf","mp4","mov","heic","bmp","tiff"]
+                            if file.type == "dir" {
+                                Task { await ideVM.loadFiles(repo: selectedRepo, path: file.path) }
+                            } else if previewExts.contains(ext) {
+                                previewFile = file
+                                showPreview = true
+                            } else {
+                                Task {
+                                    await ideVM.openFile(file)
+                                    withAnimation { ideVM.showDrawer = false }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: file.type == "dir" ? "folder.fill"
+                                    : (file.name.hasSuffix(".ash") ? "chevron.left.forwardslash.chevron.right" : "doc"))
+                                    .font(.system(size: 13))
+                                    .foregroundColor(file.type == "dir" ? Color(hex:"#e5c07b")
+                                        : file.name.hasSuffix(".ash") ? themeVM.accent : themeVM.dim)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(file.name)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(themeVM.text)
+                                    if let size = file.size, size > 0 {
+                                        Text(formatBytes(size))
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundColor(themeVM.dim)
+                                    }
+                                }
+                                Spacer()
+                                // Sync toggle for .ash files
+                                if file.type != "dir" && file.name.hasSuffix(".ash") {
+                                    Toggle("", isOn: Binding(
+                                        get: { ideVM.syncedFiles.contains(file.path) },
+                                        set: { on in
+                                            if on { ideVM.syncedFiles.insert(file.path) }
+                                            else  { ideVM.syncedFiles.remove(file.path) }
+                                        }
+                                    ))
+                                    .labelsHidden().tint(themeVM.accent).scaleEffect(0.7)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9)).foregroundColor(themeVM.dim.opacity(0.4))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain).scrollContentBackground(.hidden)
+                }
+                .sheet(isPresented: $showPreview) {
+                    if let file = previewFile {
+                        IDEFilePreviewSheet(file: file)
+                            .environmentObject(themeVM)
+                            .environmentObject(ideVM)
+                    }
+                }
+
             } else {
                 List(ideVM.repos) { repo in
                     Button {
-                        // selectRepo fixes nav: switches to repository file view
                         Task { await ideVM.selectRepo(repo) }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
@@ -894,8 +1003,105 @@ struct IDEDrawerReposTab2: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        .onAppear {
+            if ideVM.repos.isEmpty { Task { await ideVM.loadRepos() } }
+        }
+    }
+
+    private func formatBytes(_ n: Int) -> String {
+        if n < 1024 { return "\(n) B" }
+        else if n < 1_048_576 { return String(format: "%.1f KB", Double(n)/1024) }
+        else { return String(format: "%.1f MB", Double(n)/1_048_576) }
     }
 }
+
+// MARK: - File Preview Sheet
+
+struct IDEFilePreviewSheet: View {
+    let file: IDEGitHubFile
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    @Environment(\.dismiss) var dismiss
+    @State private var imageData: Data? = nil
+    @State private var isLoading = true
+    @State private var errorMsg: String? = nil
+
+    var ext: String { (file.name as NSString).pathExtension.lowercased() }
+    var isImage: Bool { ["png","jpg","jpeg","gif","webp","heic","bmp","tiff"].contains(ext) }
+    var isSVG:   Bool { ext == "svg" }
+    var isPDF:   Bool { ext == "pdf" }
+    var isVideo: Bool { ["mp4","mov","m4v"].contains(ext) }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(hex:"#0d1117").ignoresSafeArea()
+                if isLoading {
+                    VStack(spacing:12) {
+                        ProgressView().tint(themeVM.accent)
+                        Text("Loading \(file.name)…")
+                            .font(.system(size:11,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                    }
+                } else if let err = errorMsg {
+                    VStack(spacing:8) {
+                        Image(systemName:"exclamationmark.triangle")
+                            .font(.system(size:28)).foregroundColor(.orange)
+                        Text(err).font(.system(size:11)).foregroundColor(themeVM.dim)
+                    }
+                } else if isImage, let data = imageData, let uiImg = UIImage(data: data) {
+                    ScrollView([.horizontal,.vertical]) {
+                        Image(uiImage: uiImg).resizable().scaledToFit().padding()
+                    }
+                } else if (isSVG || isPDF || isVideo), let data = imageData {
+                    let b64  = data.base64EncodedString()
+                    let mime = isPDF ? "application/pdf" : isVideo ? "video/mp4" : "image/svg+xml"
+                    let html = """
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;background:#0d1117;display:flex;align-items:center;justify-content:center;min-height:100vh;}
+img,embed,video{max-width:100%;max-height:90vh;}</style>
+</head><body>
+\(isVideo ? "<video controls autoplay playsinline>" : "")
+<\(isVideo ? "source" : isPDF ? "embed type=\"application/pdf\" width=\"100%\" height=\"100%\"" : "img")
+  src="data:\(mime);base64,\(b64)"\(isVideo ? " type=\"video/mp4\"" : "")/>
+\(isVideo ? "</video>" : "")
+</body></html>
+"""
+                    IDEWebOutputView(html: html, isLoading: .constant(false))
+                } else {
+                    Text("Preview not available for this file type.")
+                        .font(.system(size:11,design:.monospaced))
+                        .foregroundColor(themeVM.dim)
+                }
+            }
+            .navigationTitle(file.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement:.navigationBarLeading) {
+                    Button("Done") { dismiss() }.foregroundColor(themeVM.accent)
+                }
+            }
+        }
+        .task { await loadPreview() }
+    }
+
+    private func loadPreview() async {
+        isLoading = true
+        defer { isLoading = false }
+        guard let dlUrl = file.downloadURL,
+              let url = URL(string: dlUrl) else {
+            errorMsg = "No download URL available."; return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            await MainActor.run { imageData = data }
+        } catch {
+            await MainActor.run { errorMsg = error.localizedDescription }
+        }
+    }
+}
+
 
 struct IDEDrawerSettingsTab: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
