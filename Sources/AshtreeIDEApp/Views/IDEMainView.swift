@@ -154,7 +154,17 @@ struct IDETabContent: View {
             Group {
                 switch ideVM.selectedTab {
                 case .editor:   IDEEditorView()
-                case .output:   IDECompilerOutputView()
+                case .output:
+                    // Route to real language render or Ash compiler output
+                    if IDELanguageStore.shared.activeEnv.id != "ash" {
+                        IDERunOutputPanel()
+                            .environmentObject(themeVM)
+                            .environmentObject(ideVM)
+                    } else {
+                        IDECompilerOutputView()
+                            .environmentObject(themeVM)
+                            .environmentObject(ideVM)
+                    }
                 case .terminal: IDETerminalView()
                 case .files:    IDEFilesView()
                 case .maze:     IDEMazeView()
