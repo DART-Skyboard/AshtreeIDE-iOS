@@ -393,13 +393,7 @@ struct IDECompilerTextPanel: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
 
-    @StateObject private var codeRunner = IDECodeRunner.shared
     var body: some View {
-        if IDELanguageStore.shared.activeEnv.id != "ash" {
-            IDERunOutputPanel()
-                .environmentObject(themeVM)
-                .environmentObject(ideVM)
-        } else {
         VStack(spacing: 0) {
             HStack {
                 Text("◈ COMPILER OUTPUT")
