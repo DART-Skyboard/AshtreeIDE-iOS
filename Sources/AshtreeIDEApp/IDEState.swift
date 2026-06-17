@@ -38,7 +38,7 @@ public final class IDEState: ObservableObject {
 
     // File source switcher
     public enum FileSource: String, CaseIterable {
-        case examples = "Examples", repository = "Repository", local = "Local"
+        case examples = "Examples", repository = "Repo Files", local = "Local"
         public var icon: String {
             switch self { case .examples: return "sparkles"; case .repository: return "chevron.left.forwardslash.chevron.right"; case .local: return "iphone" }
         }
