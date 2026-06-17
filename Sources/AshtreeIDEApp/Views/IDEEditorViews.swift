@@ -33,8 +33,20 @@ struct IDEEditorActionBar: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ActionChip(label: "▶ BUILD & RUN", color: themeVM.accent.opacity(0.9), busy: ideVM.isCompiling) {
-                    Task { await ideVM.buildAndRun() }
+                ActionChip(label: "▶ BUILD & RUN",
+                           color: Color(hex: IDELanguageStore.shared.activeEnv.color).opacity(0.9),
+                           busy: ideVM.isCompiling) {
+                    let lang = IDELanguageStore.shared.activeEnv.id
+                    if lang == "ash" {
+                        Task { await ideVM.buildAndRun() }
+                    } else {
+                        Task { @MainActor in
+                            await IDECodeRunner.shared.run(
+                                code: ideVM.sourceCode,
+                                language: lang,
+                                filename: ideVM.currentFile)
+                        }
+                    }
                 }
                 ActionChip(label: "⟳ NET COMPILE", color: Color(hex: "#39ff14").opacity(0.7), busy: ideVM.isCompiling) {
                     Task { await ideVM.buildAndRun(netMode: true) }
@@ -381,7 +393,13 @@ struct IDECompilerTextPanel: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
 
+    @StateObject private var codeRunner = IDECodeRunner.shared
     var body: some View {
+        if IDELanguageStore.shared.activeEnv.id != "ash" {
+            IDERunOutputPanel()
+                .environmentObject(themeVM)
+                .environmentObject(ideVM)
+        } else {
         VStack(spacing: 0) {
             HStack {
                 Text("◈ COMPILER OUTPUT")
