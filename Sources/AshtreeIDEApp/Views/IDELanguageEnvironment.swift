@@ -553,4 +553,20 @@ public final class IDELanguageStore: ObservableObject {
         let id = UserDefaults.standard.string(forKey: "ide_active_language_env") ?? "ash"
         activeEnv = IDELanguageEnv.find(id: id)
     }
+
+    public func setEnvFromFilename(_ name: String) {
+        let ext = "." + (name as NSString).pathExtension.lowercased()
+        let map: [String: String] = [
+            ".ash":"ash",".html":"html",".htm":"html",
+            ".css":"css",".js":"javascript",".ts":"typescript",
+            ".jsx":"react",".tsx":"react",".vue":"vue",
+            ".php":"php",".py":"python",".ipynb":"python_ml",
+            ".sql":"sql",".swift":"swift",
+            ".cpp":"cpp",".cc":"cpp",".cxx":"cpp",".c":"c",
+            ".cs":"csharp",".go":"go",".rs":"rust",
+            ".kt":"kotlin",".java":"java",".rb":"ruby",
+            ".sh":"bash",".bash":"bash",".dart":"dart",".r":"r"
+        ]
+        if let langId = map[ext] { setEnv(IDELanguageEnv.find(id: langId)) }
+    }
 }
