@@ -605,8 +605,18 @@ struct IDEExecutionOutputView: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
     @StateObject private var service = IDECompilerService.shared
-    @State private var webLoading  = false
-    @State private var desktopMode = false  // mobile/desktop view toggle
+    @State private var webLoading   = false
+    @State private var desktopMode  = false  // mobile/desktop view toggle
+    @State private var stdinText    = ""     // user-supplied stdin for compiled languages
+    @State private var showStdin    = false  // expanded stdin panel
+    @FocusState private var stdinFocused: Bool
+
+    // Languages that need stdin (compiled, not web-rendered)
+    private var needsStdin: Bool {
+        let lang = IDELanguageStore.shared.activeEnv.id
+        return ["cpp","c","java","kotlin","go","rust","swift","csharp",
+                "ruby","bash","dart","r","python","python_ml"].contains(lang)
+    }
 
     // Viewport widths: mobile=390pt, desktop=1280pt (scales inside WKWebView)
     private let mobileWidth:  CGFloat = 390
@@ -683,7 +693,9 @@ struct IDEExecutionOutputView: View {
                     IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
                     let lang = IDELanguageStore.shared.activeEnv.id
                     let projFiles = gatherProjectFiles()
+                    stdinFocused = false
                     Task { await service.execute(code: ideVM.sourceCode, language: lang,
+                                                 stdin: stdinText,
                                                  projectFiles: projFiles) }
                 } label: {
                     HStack(spacing:4) {
@@ -699,6 +711,79 @@ struct IDEExecutionOutputView: View {
             .padding(.horizontal,14).padding(.vertical,8)
             .background(themeVM.bg)
             .overlay(Divider().background(themeVM.accent.opacity(0.15)), alignment:.bottom)
+
+            // ── stdin input panel (compiled languages only) ────
+            if needsStdin {
+                VStack(spacing: 0) {
+                    // Collapsible header
+                    Button {
+                        withAnimation(.spring(response:0.25,dampingFraction:0.85)) {
+                            showStdin.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "terminal")
+                                .font(.system(size:10)).foregroundColor(themeVM.dim)
+                            Text("STDIN")
+                                .font(.system(size:8,weight:.semibold,design:.monospaced))
+                                .foregroundColor(themeVM.dim).kerning(1.5)
+                            if !stdinText.isEmpty {
+                                Text("· \(stdinText.components(separatedBy:"\n").count) line(s)")
+                                    .font(.system(size:8,design:.monospaced))
+                                    .foregroundColor(themeVM.accent)
+                            } else {
+                                Text("· tap to add program input")
+                                    .font(.system(size:8,design:.monospaced))
+                                    .foregroundColor(themeVM.dim.opacity(0.5))
+                            }
+                            Spacer()
+                            Image(systemName: showStdin ? "chevron.up" : "chevron.down")
+                                .font(.system(size:9)).foregroundColor(themeVM.dim)
+                        }
+                        .padding(.horizontal,14).padding(.vertical,7)
+                        .background(Color(hex:"#0d1117"))
+                    }
+                    .buttonStyle(.plain)
+
+                    if showStdin {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Type program input below. Each line = one Enter press during execution.")
+                                .font(.system(size:8,design:.monospaced))
+                                .foregroundColor(themeVM.dim.opacity(0.6))
+                                .padding(.horizontal,14).padding(.top,6)
+
+                            TextEditor(text: $stdinText)
+                                .focused($stdinFocused)
+                                .font(.system(size:11,design:.monospaced))
+                                .foregroundColor(themeVM.accent)
+                                .frame(minHeight:80,maxHeight:160)
+                                .padding(8)
+                                .background(Color(hex:"#161b22"))
+                                .cornerRadius(8)
+                                .overlay(RoundedRectangle(cornerRadius:8)
+                                    .stroke(stdinFocused
+                                        ? Color(hex: IDELanguageStore.shared.activeEnv.color).opacity(0.5)
+                                        : Color(hex:"#30363d"), lineWidth:0.5))
+                                .padding(.horizontal,14)
+                                .scrollContentBackground(.hidden)
+
+                            HStack(spacing:8) {
+                                Button("Clear") { stdinText = "" }
+                                    .font(.system(size:9,design:.monospaced))
+                                    .foregroundColor(.red)
+                                Spacer()
+                                Button("Done") { stdinFocused = false }
+                                    .font(.system(size:9,weight:.semibold,design:.monospaced))
+                                    .foregroundColor(themeVM.accent)
+                            }
+                            .padding(.horizontal,14).padding(.bottom,8)
+                        }
+                        .transition(.opacity.combined(with:.move(edge:.top)))
+                    }
+                }
+                .background(Color(hex:"#0d1117"))
+                .overlay(Divider().background(Color(hex:"#21262d")), alignment:.bottom)
+            }
 
             // ── Output body ────────────────────────────────────
             if service.isRunning {
@@ -749,10 +834,16 @@ struct IDEExecutionOutputView: View {
                     Text("Press RUN to execute \(env.name)")
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
-                    Text("⟳ Compiled via Piston (C++, Java, Go, Rust…) or WebView (HTML, Python, JS)")
+                    Text("Compiled remotely via Judge0 CE · free, no account needed")
                         .font(.system(size:9,design:.monospaced))
                         .foregroundColor(themeVM.dim.opacity(0.5))
                         .multilineTextAlignment(.center).padding(.horizontal,20)
+                    if needsStdin {
+                        Text("↑ Add stdin above for programs that ask for input (cin, scanf, input())")
+                            .font(.system(size:8,design:.monospaced))
+                            .foregroundColor(themeVM.dim.opacity(0.4))
+                            .multilineTextAlignment(.center).padding(.horizontal,20)
+                    }
                 }
                 .frame(maxWidth:.infinity,maxHeight:.infinity)
                 .background(themeVM.bg)
