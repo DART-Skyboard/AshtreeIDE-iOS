@@ -95,12 +95,13 @@ public final class IDECompilerService: ObservableObject {
     // Judge0 Community Edition — free public endpoint
     // No API key needed for basic use (rate limited to ~50 req/day)
     // For production: get a free key at rapidapi.com/judge0-official/api/judge0-ce
-    private let judge0Base  = "https://judge0-ce.p.rapidapi.com"
+    private let judge0Base  = "https://ce.judge0.com"
     private let pistonBase  = "https://emkc.org/api/v2/piston"
 
     // MARK: - Main entry point
 
-    public func execute(code: String, language: String, stdin: String = "") async {
+    public func execute(code: String, language: String, stdin: String = "",
+                        projectFiles: [String: String] = [:]) async {
         isRunning   = true
         showWebView = false
         result      = nil
@@ -109,7 +110,7 @@ public final class IDECompilerService: ObservableObject {
         let strategy = executionStrategy(for: language)
         switch strategy {
         case .webView:
-            let html = buildWebHTML(code: code, language: language)
+            let html = buildWebHTML(code: code, language: language, projectFiles: projectFiles)
             result = ExecutionResult(stdout: "", stderr: "", compileError: "",
                                      exitCode: 0, time: "–", memory: "–",
                                      webHTML: html, language: language)
@@ -140,15 +141,15 @@ public final class IDECompilerService: ObservableObject {
         case "php":                   return .webView  // PHP-WASM
         case "sql":                   return .webView  // SQL.js WASM
 
-        // Remote compilation via Piston (free, no auth, most reliable)
-        case "cpp", "c", "csharp":   return .piston
-        case "java", "kotlin":        return .piston
-        case "go", "rust":            return .piston
-        case "ruby", "bash":          return .piston
-        case "r":                     return .piston
-        case "swift":                 return .piston
-        case "dart":                  return .piston
-        case "typescript":            return .piston
+        // Remote compilation via Judge0 CE (free, no auth required)
+        case "cpp", "c", "csharp":   return .judge0
+        case "java", "kotlin":        return .judge0
+        case "go", "rust":            return .judge0
+        case "ruby", "bash":          return .judge0
+        case "r":                     return .judge0
+        case "swift":                 return .judge0
+        case "dart":                  return .piston   // Judge0 CE lacks Dart
+        case "typescript":            return .judge0
 
         default:                      return .notSupported("Language '\(language)' is not yet supported.")
         }
@@ -156,11 +157,45 @@ public final class IDECompilerService: ObservableObject {
 
     // MARK: - WKWebView HTML builder
 
-    private func buildWebHTML(code: String, language: String) -> String {
+    private func buildWebHTML(code: String, language: String,
+                               projectFiles: [String: String] = [:]) -> String {
         switch language {
 
         case "html":
-            return code
+            // Inline referenced CSS and JS files from project
+            var html = code
+            // Find all <link rel="stylesheet" href="..."> and inline CSS
+            let cssPattern = #"<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*>"#
+            if let cssRegex = try? NSRegularExpression(pattern: cssPattern, options: .caseInsensitive) {
+                let matches = cssRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+                for match in matches.reversed() {
+                    guard let fullRange = Range(match.range, in: html),
+                          let hrefRange = Range(match.range(at: 1), in: html) else { continue }
+                    let filename = String(html[hrefRange])
+                    let basename = URL(fileURLWithPath: filename).lastPathComponent
+                    if let css = projectFiles[basename] ?? projectFiles[filename] {
+                        html = html.replacingCharacters(in: fullRange,
+                            with: "<style>\(css)</style>")
+                    }
+                }
+            }
+            // Find all <script src="..."> and inline JS
+            let jsPattern = #"<script[^>]+src=["']([^"']+)["'][^>]*></script>"#
+            if let jsRegex = try? NSRegularExpression(pattern: jsPattern, options: .caseInsensitive) {
+                let matches = jsRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+                for match in matches.reversed() {
+                    guard let fullRange = Range(match.range, in: html),
+                          let srcRange = Range(match.range(at: 1), in: html) else { continue }
+                    let filename = String(html[srcRange])
+                    let basename = URL(fileURLWithPath: filename).lastPathComponent
+                    // Only inline local references (not https:// CDN links)
+                    if !filename.hasPrefix("http"), let js = projectFiles[basename] ?? projectFiles[filename] {
+                        html = html.replacingCharacters(in: fullRange,
+                            with: "<script>\(js)</script>")
+                    }
+                }
+            }
+            return html
 
         case "css":
             return """
@@ -414,28 +449,25 @@ initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.2/dist/${
             return
         }
 
-        let srcB64   = Data(code.utf8).base64EncodedString()
-        let stdinB64 = Data(stdin.utf8).base64EncodedString()
-        let submitURL = URL(string: "\(judge0Base)/submissions?base64_encoded=true&wait=true")!
+        // ce.judge0.com — free public Judge0 instance, no API key required
+        let submitURL = URL(string: "\(judge0Base)/submissions/?base64_encoded=false&wait=true")!
         var req = URLRequest(url: submitURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("judge0-ce.p.rapidapi.com", forHTTPHeaderField: "x-rapidapi-host")
-        // Optional: set x-rapidapi-key from UserDefaults if user has configured one
-        if let key = UserDefaults.standard.string(forKey: "ide_judge0_key"), !key.isEmpty {
-            req.setValue(key, forHTTPHeaderField: "x-rapidapi-key")
-        }
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "language_id": langId.rawValue, "source_code": srcB64,
-            "stdin": stdinB64, "base64_encoded": true,
-            "cpu_time_limit": 10, "memory_limit": 256000
+            "language_id":    langId.rawValue,
+            "source_code":    code,
+            "stdin":          stdin,
+            "cpu_time_limit": 10,
+            "memory_limit":   262144
         ] as [String: Any])
 
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            // 401/403/429 → key missing or rate limited → go to Piston
-            if statusCode == 401 || statusCode == 403 || statusCode == 429 {
+            if statusCode >= 400 {
+                // Judge0 unavailable — try Piston
                 await executePiston(code: code, language: language, stdin: stdin)
                 return
             }
@@ -450,22 +482,21 @@ initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.2/dist/${
     }
 
     private func parseJudge0Response(_ json: [String: Any], language: String) async {
-        func decode(_ key: String) -> String {
-            guard let b64 = json[key] as? String,
-                  let data = Data(base64Encoded: b64) else { return "" }
-            return String(data: data, encoding: .utf8) ?? ""
-        }
-        let stdout = decode("stdout")
-        let stderr = decode("stderr")
-        let compileErr = decode("compile_output")
-        let status = (json["status"] as? [String: Any])?["description"] as? String ?? "–"
-        let time   = (json["time"] as? String) ?? "–"
-        let mem    = json["memory"] != nil ? "\(json["memory"]!) KB" : "–"
-        let exit   = (json["exit_code"] as? Int) ?? (compileErr.isEmpty ? 0 : 1)
+        // ce.judge0.com returns plain strings (not base64)
+        let stdout     = (json["stdout"]         as? String) ?? ""
+        let stderr     = (json["stderr"]         as? String) ?? ""
+        let compileErr = (json["compile_output"] as? String) ?? ""
+        let time       = (json["time"]           as? String) ?? "–"
+        let mem        = json["memory"] != nil ? "\(json["memory"]!) KB" : "–"
+        let statusId   = (json["status"] as? [String: Any])?["id"] as? Int ?? 3
+        // Status 3 = Accepted, anything else = error
+        let exitCode   = (statusId == 3) ? 0 : 1
 
         result = ExecutionResult(
-            stdout: stdout, stderr: stderr, compileError: compileErr,
-            exitCode: exit, time: "\(time)s", memory: mem,
+            stdout: stdout.trimmingCharacters(in: .newlines),
+            stderr: stderr.trimmingCharacters(in: .newlines),
+            compileError: compileErr.trimmingCharacters(in: .newlines),
+            exitCode: exitCode, time: "\(time)s", memory: mem,
             webHTML: nil, language: language
         )
     }
@@ -651,7 +682,9 @@ struct IDEExecutionOutputView: View {
                 Button {
                     IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
                     let lang = IDELanguageStore.shared.activeEnv.id
-                    Task { await service.execute(code: ideVM.sourceCode, language: lang) }
+                    let projFiles = gatherProjectFiles()
+                    Task { await service.execute(code: ideVM.sourceCode, language: lang,
+                                                 projectFiles: projFiles) }
                 } label: {
                     HStack(spacing:4) {
                         Image(systemName:"play.fill").font(.system(size:9))
@@ -731,6 +764,19 @@ struct IDEExecutionOutputView: View {
         if !r.compileError.isEmpty { return "COMPILE ERROR" }
         if r.exitCode != 0 { return "RUNTIME ERROR (exit \(r.exitCode))" }
         return "✓ COMPLETE"
+    }
+
+    // Gather all files in the active project for HTML inlining
+    private func gatherProjectFiles() -> [String: String] {
+        guard let proj = IDEProjectStore.shared.activeProject else { return [:] }
+        var files: [String: String] = [:]
+        for path in proj.allFilePaths {
+            let content = IDEProjectStore.shared.readFile(in: proj.id, path: path)
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            files[name] = content
+            files[path] = content
+        }
+        return files
     }
 
     // Inject correct viewport meta for mobile/desktop mode
