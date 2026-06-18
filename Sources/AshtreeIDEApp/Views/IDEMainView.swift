@@ -90,10 +90,19 @@ struct IDETopBar: View {
 
             // Build & Run
             Button {
-                Task { await ideVM.buildAndRun() }
+                IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
+                let runLang = IDELanguageStore.shared.activeEnv.id
+                if runLang == "ash" {
+                    Task { await ideVM.buildAndRun() }
+                } else {
+                    Task { @MainActor in
+                        await IDECompilerService.shared.execute(
+                            code: ideVM.sourceCode, language: runLang)
+                    }
+                }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: ideVM.isCompiling ? "ellipsis" : "play.fill")
+                    Image(systemName: (ideVM.isCompiling || IDECompilerService.shared.isRunning) ? "ellipsis" : "play.fill")
                         .font(.system(size: 10, weight: .bold))
                     Text(ideVM.isCompiling ? "…" : "RUN")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
