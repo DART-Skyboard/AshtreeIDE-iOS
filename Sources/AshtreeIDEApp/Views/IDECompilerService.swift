@@ -213,7 +213,7 @@ try {
   \(escaped)
   status.textContent = "✓ COMPLETE";
 } catch(e) {
-  out.innerHTML += `<div class="err">\(language === "typescript" ? "TypeScript " : "")Error: ${e}</div>`;
+  out.innerHTML += `<div class="err">Error: ${e}</div>`;
   status.textContent = "✗ ERROR";
 }
 </script></body></html>
@@ -343,7 +343,7 @@ async function runPHP() {
     status.textContent = "✓ COMPLETE";
   } catch(e) {
     // Fallback: show PHP source with syntax highlighting note
-    out.innerHTML = `<span class="err">PHP-WASM unavailable in this environment.<br>Your PHP code is ready — export and run on a PHP server.</span>\n\n` + `\(escaped.replacingOccurrences(of:"<","&lt;"))`;
+    out.innerHTML = `<span class="err">PHP-WASM unavailable in this environment.<br>Your PHP code is ready — export and run on a PHP server.</span>\n\n` + `\(escaped.replacingOccurrences(of:"<",with:"&lt;"))`;
     status.textContent = "✗ PHP-WASM NOT AVAILABLE";
   }
 }
