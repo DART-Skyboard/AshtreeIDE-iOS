@@ -35,16 +35,16 @@ struct IDEEditorActionBar: View {
             HStack(spacing: 6) {
                 ActionChip(label: "▶ BUILD & RUN",
                            color: Color(hex: IDELanguageStore.shared.activeEnv.color).opacity(0.9),
-                           busy: ideVM.isCompiling) {
+                           busy: ideVM.isCompiling || IDECompilerService.shared.isRunning) {
                     let lang = IDELanguageStore.shared.activeEnv.id
                     if lang == "ash" {
                         Task { await ideVM.buildAndRun() }
                     } else {
+                        // Route to real compiler (Judge0/Piston) or WebView (HTML/Python/JS)
                         Task { @MainActor in
-                            await IDECodeRunner.shared.run(
+                            await IDECompilerService.shared.execute(
                                 code: ideVM.sourceCode,
-                                language: lang,
-                                filename: ideVM.currentFile)
+                                language: lang)
                         }
                     }
                 }
