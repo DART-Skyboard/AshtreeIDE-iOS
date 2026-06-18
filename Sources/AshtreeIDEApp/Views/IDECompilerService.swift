@@ -678,31 +678,12 @@ struct IDEExecutionOutputView: View {
                 Spacer()
             } else if let r = service.result {
                 if let html = r.webHTML {
-                    // Web render with mobile/desktop viewport scaling
-                    GeometryReader { geo in
-                        let viewW  = geo.size.width
-                        let targetW: CGFloat = desktopMode ? desktopWidth : mobileWidth
-                        let scale  = viewW / targetW
-                        // Inject viewport meta to force desktop or mobile rendering
-                        let viewportMeta = desktopMode
-                            ? "<meta name=\"viewport\" content=\"width=1280\">"
-                            : "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                        // Insert/replace viewport meta in the HTML
-                        let adjustedHTML: String
-                        if html.contains("<meta name=\"viewport\"") || html.contains("<meta name='viewport'") {
-                            adjustedHTML = html
-                                .replacingOccurrences(of: "<meta name=\"viewport\"[^>]*>",
-                                    with: viewportMeta,
-                                    options: .regularExpression)
-                        } else if html.contains("<head>") {
-                            adjustedHTML = html.replacingOccurrences(of: "<head>",
-                                with: "<head>\(viewportMeta)")
-                        } else {
-                            adjustedHTML = viewportMeta + html
-                        }
-                        IDEWebOutputView(html: adjustedHTML, isLoading: $webLoading)
-                            .id("\(desktopMode)") // force WKWebView reload on mode change
-                    }
+                    // Web render with mobile/desktop viewport injection
+                    IDEWebOutputView(
+                        html: injectViewport(html: html, desktop: desktopMode),
+                        isLoading: $webLoading
+                    )
+                    .id(desktopMode) // forces WKWebView reload on mode change
                 } else {
                     // Terminal-style text output
                     ScrollView {
@@ -750,6 +731,22 @@ struct IDEExecutionOutputView: View {
         if !r.compileError.isEmpty { return "COMPILE ERROR" }
         if r.exitCode != 0 { return "RUNTIME ERROR (exit \(r.exitCode))" }
         return "✓ COMPLETE"
+    }
+
+    // Inject correct viewport meta for mobile/desktop mode
+    private func injectViewport(html: String, desktop: Bool) -> String {
+        let meta = desktop
+            ? "<meta name=\"viewport\" content=\"width=1280\">"
+            : "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        // Replace existing viewport meta if present
+        if html.range(of: "<meta[^>]+viewport[^>]*>", options: .regularExpression) != nil {
+            return html.replacingOccurrences(
+                of: "<meta[^>]+viewport[^>]*>", with: meta, options: .regularExpression)
+        } else if html.contains("<head>") {
+            return html.replacingOccurrences(of: "<head>", with: "<head>" + meta)
+        } else {
+            return meta + html
+        }
     }
 
     @ViewBuilder
