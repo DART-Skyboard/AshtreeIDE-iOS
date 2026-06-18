@@ -300,6 +300,9 @@ public final class IDEProjectStore: ObservableObject {
     @Published public var activeFilePath: String? = nil
     @Published public var expandedFolders: Set<String> = []
 
+    // Load immediately on init so first render has data
+    private init() { load() }
+
     public var activeProject: IDEProject? {
         guard let id = activeProjectId else { return nil }
         return projects.first { $0.id == id }
