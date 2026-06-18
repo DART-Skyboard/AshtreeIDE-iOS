@@ -1397,3 +1397,843 @@ window.addEventListener('resize', () => {
         }
     }
 }
+
+
+// Sub-view for repo files (extracted to keep IDEDrawerFilesTab manageable)
+struct IDEDrawerRepoFilesTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    var body: some View {
+        IDEDrawerReposTab2()
+    }
+}
+
+
+struct IDELocalFilesSection: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    // Multi-select state
+    @State private var selectMode   = false
+    @State private var selected     = Set<String>()
+
+    // Rename state
+    @State private var renamingFile: String? = nil
+    @State private var renameText   = ""
+
+    // Export state
+    @State private var showExportOptions = false
+    @State private var exportAsZip      = false
+    @State private var exportedZip: Data?  = nil
+    @State private var showZipShare      = false
+    @State private var showIndivExport   = false
+    @State private var exportQueue: [String] = []
+    @State private var exportIdx         = 0
+
+    // Confirm delete
+    @State private var showDeleteConfirm = false
+
+    var body: some View {
+        Section {
+            // ── Toolbar row (normal / select mode) ──────────────
+            if selectMode {
+                // Select mode header
+                HStack {
+                    Button {
+                        if selected.count == ideVM.localFiles.count {
+                            selected.removeAll()
+                        } else {
+                            selected = Set(ideVM.localFiles)
+                        }
+                    } label: {
+                        Image(systemName: selected.count == ideVM.localFiles.count
+                            ? "checkmark.square.fill" : "square")
+                            .foregroundColor(themeVM.accent)
+                        Text(selected.count == ideVM.localFiles.count ? "Deselect All" : "Select All")
+                            .font(.system(size: 11)).foregroundColor(themeVM.accent)
+                    }
+                    Spacer()
+                    Button("Done") {
+                        withAnimation { selectMode = false; selected.removeAll() }
+                    }
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(themeVM.accent)
+                }
+                .padding(.vertical, 4)
+
+                // Action buttons when files are selected
+                if !selected.isEmpty {
+                    HStack(spacing: 8) {
+                        // Export ZIP
+                        Button {
+                            exportAsZip = true
+                            buildAndShareZip()
+                        } label: {
+                            Label("ZIP", systemImage: "archivebox")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(themeVM.accent).cornerRadius(6)
+                        }
+                        // Export individual
+                        Button {
+                            exportQueue = Array(selected)
+                            exportIdx = 0
+                            ideVM.exportFileToDevice = true
+                            ideVM.sourceCode = UserDefaults.standard.string(forKey: "ide_local_\(exportQueue[0])") ?? ""
+                            ideVM.currentFile = exportQueue[0]
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(themeVM.accent)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(themeVM.accent.opacity(0.12)).cornerRadius(6)
+                        }
+                        Spacer()
+                        // Delete selected
+                        Button {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.red)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color.red.opacity(0.12)).cornerRadius(6)
+                        }
+                        .confirmationDialog(
+                            "Delete \(selected.count) file(s)?",
+                            isPresented: $showDeleteConfirm, titleVisibility: .visible
+                        ) {
+                            Button("Delete", role: .destructive) {
+                                selected.forEach { ideVM.deleteLocalFile($0) }
+                                selected.removeAll(); selectMode = false
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        }
+                    }
+                }
+            } else {
+                // Normal mode: restore + new file buttons
+                Button {
+                    ideVM.examples.forEach { ex in
+                        let fname = ex.name.lowercased().replacingOccurrences(of:" ",with:"_") + ".ash"
+                        UserDefaults.standard.set(ex.code, forKey:"ide_local_\(fname)")
+                        if !ideVM.localFiles.contains(fname) { ideVM.localFiles.append(fname) }
+                    }
+                    UserDefaults.standard.set(ideVM.localFiles, forKey:"ide_local_file_list")
+                    UserDefaults.standard.synchronize(); ideVM.loadLocalFiles()
+                } label: {
+                    Label("Restore Default Projects", systemImage:"arrow.counterclockwise")
+                        .foregroundColor(themeVM.dim)
+                }
+
+                Button {
+                    ideVM.newFile()
+                } label: {
+                    Label("New Local File", systemImage:"plus.square").foregroundColor(themeVM.accent)
+                }
+            }
+
+            // ── File rows ────────────────────────────────────────
+            ForEach(ideVM.localFiles, id:\.self) { name in
+                Group {
+                    if renamingFile == name {
+                        // Inline rename field
+                        HStack {
+                            Image(systemName:"pencil").foregroundColor(themeVM.accent)
+                            TextField("Filename", text: $renameText)
+                                .font(.system(size:12,design:.monospaced))
+                                .foregroundColor(themeVM.text)
+                                .onSubmit { commitRename(from: name) }
+                                .autocorrectionDisabled()
+                                .autocapitalization(.none)
+                            Button("Save") { commitRename(from: name) }
+                                .font(.system(size:11,weight:.semibold))
+                                .foregroundColor(themeVM.accent)
+                        }
+                        .padding(.vertical, 2)
+                    } else if selectMode {
+                        // Checkbox row
+                        Button {
+                            if selected.contains(name) { selected.remove(name) }
+                            else { selected.insert(name) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: selected.contains(name)
+                                    ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(selected.contains(name) ? themeVM.accent : themeVM.dim)
+                                Image(systemName: ideVM.currentFile == name ? "doc.text.fill" : "doc.text")
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.dim)
+                                Text(name)
+                                    .font(.system(size:12))
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.text)
+                                    .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        // Normal tap row with long-press
+                        Button {
+                            ideVM.openLocalFile(name)
+                            withAnimation { ideVM.showDrawer = false }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: ideVM.currentFile == name ? "doc.text.fill" : "doc.text")
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.dim)
+                                Text(name)
+                                    .foregroundColor(ideVM.currentFile == name ? themeVM.accent : themeVM.text)
+                                    .fontWeight(ideVM.currentFile == name ? .semibold : .regular)
+                                Spacer()
+                                if ideVM.currentFile == name {
+                                    Circle().fill(themeVM.accent).frame(width:5,height:5)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                            withAnimation { selectMode = true; selected.insert(name) }
+                        })
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role:.destructive) { ideVM.deleteLocalFile(name) }
+                                label: { Label("Delete", systemImage:"trash") }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                renamingFile = name
+                                renameText = String(name.dropLast(name.hasSuffix(".ash") ? 4 : 0))
+                            } label: {
+                                Label("Rename", systemImage:"pencil")
+                            }
+                            .tint(themeVM.accent)
+                        }
+                    }
+                }
+            }
+
+            // ── Save button ──────────────────────────────────────
+            if !selectMode {
+                Button {
+                    ideVM.saveLocally(); ideVM.exportFileToDevice = true
+                } label: {
+                    HStack(spacing:6) {
+                        Image(systemName:"square.and.arrow.down").foregroundColor(themeVM.accent)
+                        Text("Save to Device").foregroundColor(themeVM.accent)
+                    }
+                }
+            }
+        } header: {
+            Text("LOCAL DEVICE FILES").font(.system(size:9,weight:.semibold,design:.monospaced))
+                .foregroundColor(themeVM.dim).kerning(1)
+        }
+        // ZIP share sheet
+        .sheet(isPresented: $showZipShare) {
+            if let zipData = exportedZip {
+                ShareSheet(items: [zipData as Any])
+            }
+        }
+    }
+
+    // Commit inline rename
+    func commitRename(from oldName: String) {
+        var newName = renameText.trimmingCharacters(in: .whitespaces)
+        if !newName.hasSuffix(".ash") { newName += ".ash" }
+        guard !newName.isEmpty, newName != oldName, !ideVM.localFiles.contains(newName) else {
+            renamingFile = nil; return
+        }
+        let content = UserDefaults.standard.string(forKey:"ide_local_\(oldName)") ?? ""
+        UserDefaults.standard.set(content, forKey:"ide_local_\(newName)")
+        UserDefaults.standard.removeObject(forKey:"ide_local_\(oldName)")
+        if let idx = ideVM.localFiles.firstIndex(of: oldName) {
+            ideVM.localFiles[idx] = newName
+        }
+        UserDefaults.standard.set(ideVM.localFiles, forKey:"ide_local_file_list")
+        UserDefaults.standard.synchronize()
+        if ideVM.currentFile == oldName { ideVM.currentFile = newName }
+        renamingFile = nil
+        ideVM.loadLocalFiles()
+    }
+
+    // Build ZIP from selected files and share
+    func buildAndShareZip() {
+        var zip = Data()
+        var centralDir = Data()
+        var offsets = [UInt32]()
+
+        func u16(_ v: Int) -> Data { var n = UInt16(v); return Data(bytes:&n,count:2) }
+        func u32(_ v: Int) -> Data { var n = UInt32(v); return Data(bytes:&n,count:4) }
+
+        for fname in selected {
+            let content = UserDefaults.standard.string(forKey:"ide_local_\(fname)") ?? ""
+            let fileData = Data(content.utf8)
+            let nameBytes = Data(fname.utf8)
+            let crc: UInt32 = {
+                var c: UInt32 = 0xFFFFFFFF
+                var t=[UInt32](repeating:0,count:256)
+                for i in 0..<256{var v=UInt32(i);for _ in 0..<8{v=(v&1) != 0 ? (v>>1)^0xEDB88320 : v>>1};t[i]=v}
+                for b in fileData{c=(c>>8)^t[Int((c^UInt32(b))&0xFF)]};return c^0xFFFFFFFF
+            }()
+            let offset = UInt32(zip.count); offsets.append(offset)
+            var lh=Data(); lh += Data([0x50,0x4B,0x03,0x04])
+            lh += u16(20);lh += u16(0);lh += u16(0);lh += u16(0);lh += u16(0)
+            lh += u32(Int(crc));lh += u32(fileData.count);lh += u32(fileData.count)
+            lh += u16(nameBytes.count);lh += u16(0);lh += nameBytes;lh += fileData
+            zip += lh
+            var cd=Data(); cd += Data([0x50,0x4B,0x01,0x02])
+            cd += u16(20);cd += u16(20);cd += u16(0);cd += u16(0);cd += u16(0);cd += u16(0);cd += u16(0)
+            cd += u32(Int(crc));cd += u32(fileData.count);cd += u32(fileData.count)
+            cd += u16(nameBytes.count);cd += u16(0);cd += u16(0);cd += u16(0);cd += u16(0);cd += u32(0)
+            cd += u32(Int(offset));cd += nameBytes
+            centralDir += cd
+        }
+        let cdOffset=UInt32(zip.count),cdSize=UInt32(centralDir.count); zip += centralDir
+        var eocd=Data(); eocd += Data([0x50,0x4B,0x05,0x06])
+        eocd += u16(0);eocd += u16(0);eocd += u16(selected.count);eocd += u16(selected.count)
+        eocd += u32(Int(cdSize));eocd += u32(Int(cdOffset));eocd += u16(0); zip += eocd
+        exportedZip = zip
+        showZipShare = true
+    }
+}
+
+// UIActivityViewController wrapper for ZIP sharing
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+
+struct IDEDrawerReposTab2: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    @State private var previewFile: IDEGitHubFile? = nil
+    @State private var showPreview = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("REPOSITORIES")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(themeVM.dim).kerning(1)
+                    if !ideVM.syncedFiles.isEmpty {
+                        Text("\(ideVM.syncedFiles.count) file(s) syncing")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(themeVM.accent)
+                    }
+                }
+                Spacer()
+                // Refresh/reconnect button
+                Button { Task { await ideVM.loadRepos() } } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Refresh").font(.system(size: 9))
+                    }
+                    .foregroundColor(themeVM.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(themeVM.accent.opacity(0.1)).cornerRadius(5)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            if ideVM.isLoadingFiles {
+                ProgressView().tint(themeVM.accent).padding()
+            } else if ideVM.repos.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "folder.badge.questionmark")
+                        .font(.system(size: 32))
+                        .foregroundColor(themeVM.dim.opacity(0.4))
+                    Text("No repositories loaded")
+                        .font(.system(size: 12))
+                        .foregroundColor(themeVM.dim)
+                    Button("Load Repos") { Task { await ideVM.loadRepos() } }
+                        .font(.system(size: 11))
+                        .foregroundColor(themeVM.accent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+            } else if let selectedRepo = ideVM.currentRepo {
+                // ── File browser for selected repo ─────────────────
+                VStack(spacing: 0) {
+                    // Back button + repo name
+                    HStack {
+                        Button {
+                            ideVM.currentRepo = nil
+                            ideVM.repoFiles   = []
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("Repos")
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            .foregroundColor(themeVM.accent)
+                        }
+                        Spacer()
+                        Text(selectedRepo.name)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(themeVM.text)
+                        Spacer()
+                        if ideVM.isLoadingFiles {
+                            ProgressView().scaleEffect(0.7).tint(themeVM.accent)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color(hex: "#161b22"))
+
+                    // Breadcrumb path
+                    if !ideVM.currentPath.isEmpty {
+                        HStack {
+                            Button("/ root") {
+                                Task { await ideVM.loadFiles(repo: selectedRepo, path: "") }
+                            }
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(themeVM.dim)
+                            Text("/")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(themeVM.dim)
+                            Text(ideVM.currentPath)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(themeVM.accent)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 4)
+                    }
+
+                    List(ideVM.repoFiles, id: \.path) { file in
+                        Button {
+                            let ext = (file.name as NSString).pathExtension.lowercased()
+                            let previewExts = ["png","jpg","jpeg","gif","webp","svg",
+                                               "pdf","mp4","mov","heic","bmp","tiff"]
+                            if file.type == "dir" {
+                                Task { await ideVM.loadFiles(repo: selectedRepo, path: file.path) }
+                            } else if previewExts.contains(ext) {
+                                previewFile = file
+                                showPreview = true
+                            } else {
+                                Task {
+                                    await ideVM.openFile(file)
+                                    withAnimation { ideVM.showDrawer = false }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: file.type == "dir" ? "folder.fill"
+                                    : (file.name.hasSuffix(".ash") ? "chevron.left.forwardslash.chevron.right" : "doc"))
+                                    .font(.system(size: 13))
+                                    .foregroundColor(file.type == "dir" ? Color(hex:"#e5c07b")
+                                        : file.name.hasSuffix(".ash") ? themeVM.accent : themeVM.dim)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(file.name)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(themeVM.text)
+                                    if let size = file.size, size > 0 {
+                                        Text(formatBytes(size))
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundColor(themeVM.dim)
+                                    }
+                                }
+                                Spacer()
+                                // Sync toggle for .ash files
+                                if file.type != "dir" && file.name.hasSuffix(".ash") {
+                                    Toggle("", isOn: Binding(
+                                        get: { ideVM.syncedFiles.contains(file.path) },
+                                        set: { on in
+                                            if on { ideVM.syncedFiles.insert(file.path) }
+                                            else  { ideVM.syncedFiles.remove(file.path) }
+                                        }
+                                    ))
+                                    .labelsHidden().tint(themeVM.accent).scaleEffect(0.7)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9)).foregroundColor(themeVM.dim.opacity(0.4))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain).scrollContentBackground(.hidden)
+                }
+                .sheet(isPresented: $showPreview) {
+                    if let file = previewFile {
+                        IDEFilePreviewSheet(file: file)
+                            .environmentObject(themeVM)
+                            .environmentObject(ideVM)
+                    }
+                }
+
+            } else {
+                List(ideVM.repos) { repo in
+                    Button {
+                        Task { await ideVM.selectRepo(repo) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(repo.name, systemImage: repo.isPrivate ? "lock.fill" : "folder")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(themeVM.text)
+                            if let desc = repo.description, !desc.isEmpty {
+                                Text(desc)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(themeVM.dim)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .onAppear {
+            if ideVM.repos.isEmpty { Task { await ideVM.loadRepos() } }
+        }
+    }
+
+    private func formatBytes(_ n: Int) -> String {
+        if n < 1024 { return "\(n) B" }
+        else if n < 1_048_576 { return String(format: "%.1f KB", Double(n)/1024) }
+        else { return String(format: "%.1f MB", Double(n)/1_048_576) }
+    }
+}
+
+// MARK: - File Preview Sheet
+
+struct IDEFilePreviewSheet: View {
+    let file: IDEGitHubFile
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+    @Environment(\.dismiss) var dismiss
+    @State private var imageData: Data? = nil
+    @State private var isLoading = true
+    @State private var errorMsg: String? = nil
+
+    var ext: String { (file.name as NSString).pathExtension.lowercased() }
+    var isImage: Bool { ["png","jpg","jpeg","gif","webp","heic","bmp","tiff"].contains(ext) }
+    var isSVG:   Bool { ext == "svg" }
+    var isPDF:   Bool { ext == "pdf" }
+    var isVideo: Bool { ["mp4","mov","m4v"].contains(ext) }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(hex:"#0d1117").ignoresSafeArea()
+                if isLoading {
+                    VStack(spacing:12) {
+                        ProgressView().tint(themeVM.accent)
+                        Text("Loading \(file.name)…")
+                            .font(.system(size:11,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                    }
+                } else if let err = errorMsg {
+                    VStack(spacing:8) {
+                        Image(systemName:"exclamationmark.triangle")
+                            .font(.system(size:28)).foregroundColor(.orange)
+                        Text(err).font(.system(size:11)).foregroundColor(themeVM.dim)
+                    }
+                } else if isImage, let data = imageData, let uiImg = UIImage(data: data) {
+                    ScrollView([.horizontal,.vertical]) {
+                        Image(uiImage: uiImg).resizable().scaledToFit().padding()
+                    }
+                } else if (isSVG || isPDF || isVideo), let data = imageData {
+                    let b64  = data.base64EncodedString()
+                    let mime = isPDF ? "application/pdf" : isVideo ? "video/mp4" : "image/svg+xml"
+                    let html = """
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;background:#0d1117;display:flex;align-items:center;justify-content:center;min-height:100vh;}
+img,embed,video{max-width:100%;max-height:90vh;}</style>
+</head><body>
+\(isVideo ? "<video controls autoplay playsinline>" : "")
+<\(isVideo ? "source" : isPDF ? "embed type=\"application/pdf\" width=\"100%\" height=\"100%\"" : "img")
+  src="data:\(mime);base64,\(b64)"\(isVideo ? " type=\"video/mp4\"" : "")/>
+\(isVideo ? "</video>" : "")
+</body></html>
+"""
+                    IDEWebOutputView(html: html, isLoading: .constant(false))
+                } else {
+                    Text("Preview not available for this file type.")
+                        .font(.system(size:11,design:.monospaced))
+                        .foregroundColor(themeVM.dim)
+                }
+            }
+            .navigationTitle(file.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement:.navigationBarLeading) {
+                    Button("Done") { dismiss() }.foregroundColor(themeVM.accent)
+                }
+            }
+        }
+        .task { await loadPreview() }
+    }
+
+    private func loadPreview() async {
+        isLoading = true
+        defer { isLoading = false }
+        guard let dlUrl = file.downloadURL,
+              let url = URL(string: dlUrl) else {
+            errorMsg = "No download URL available."; return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            await MainActor.run { imageData = data }
+        } catch {
+            await MainActor.run { errorMsg = error.localizedDescription }
+        }
+    }
+}
+
+
+struct IDEDrawerSettingsTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        List {
+            Section {
+                // Theme picker
+                Picker("Theme", selection: $themeVM.current) {
+                    ForEach(IDEThemeViewModel.Theme.allCases, id: \.self) { t in
+                        HStack {
+                            Circle().fill(t.accent).frame(width: 8, height: 8)
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                }
+                .tint(themeVM.accent)
+            } header: {
+                Text("APPEARANCE").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+
+            Section {
+                LabeledContent("Compiler", value: "LEATR v2.0").foregroundColor(themeVM.text)
+                LabeledContent("Switch Eq.", value: "(xa²√xa) ± 1").foregroundColor(themeVM.text)
+                LabeledContent("LEATR", value: "25 Orders of Operation").foregroundColor(themeVM.text)
+                LabeledContent("Tools 1-7", value: "Maze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors").foregroundColor(themeVM.text)
+                LabeledContent("Math 8-19", value: "Parentheses · Exponents · ×÷ · +- · Log · Trig · Temp · Vel · Pressure · Mass · Photosyn.").foregroundColor(themeVM.text)
+                LabeledContent("Senses 20-25", value: "Touch · Taste · Vision · Smell · Hear · Proprioception").foregroundColor(themeVM.text)
+                LabeledContent("BRPN", value: "Buoyancy Reflex Pendulum Node").foregroundColor(themeVM.text)
+                LabeledContent("Shells", value: "Aerospace / Maritime / Geological").foregroundColor(themeVM.text)
+                LabeledContent("Maze", value: "LEMAC + D3.e algorithm").foregroundColor(themeVM.text)
+            } header: {
+                Text("COMPILER").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
+
+struct IDEDrawerProfileTab: View {
+    @EnvironmentObject var authVM:  IDEAuthViewModel
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @State private var editingUsername = false
+    @State private var draftUsername   = ""
+
+    var body: some View {
+        List {
+            // ── App Username (editable) ──────────────────────────
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("App Username")
+                            .font(.system(size: 10)).foregroundColor(themeVM.dim)
+                        if editingUsername {
+                            TextField("Username", text: $draftUsername)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(themeVM.accent)
+                                .onSubmit {
+                                    let trimmed = draftUsername.trimmingCharacters(in: .whitespaces)
+                                    if !trimmed.isEmpty {
+                                        authVM.appUsername = trimmed
+                                        KeychainHelper.save(key: "ide_app_username", value: trimmed)
+                                        authVM.username = trimmed
+                                    }
+                                    editingUsername = false
+                                }
+                                .autocorrectionDisabled()
+                                .autocapitalization(.none)
+                        } else {
+                            Text(authVM.appUsername.isEmpty ? authVM.username : authVM.appUsername)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(themeVM.text)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        if editingUsername {
+                            let trimmed = draftUsername.trimmingCharacters(in: .whitespaces)
+                            if !trimmed.isEmpty {
+                                authVM.appUsername = trimmed
+                                KeychainHelper.save(key: "ide_app_username", value: trimmed)
+                                authVM.username = trimmed
+                            }
+                            editingUsername = false
+                        } else {
+                            draftUsername   = authVM.appUsername.isEmpty ? authVM.username : authVM.appUsername
+                            editingUsername = true
+                        }
+                    } label: {
+                        Text(editingUsername ? "Save" : "Edit")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(themeVM.accent)
+                    }
+                }
+            } header: {
+                Text("ACCOUNT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+
+            // ── Connected Accounts ───────────────────────────────
+            // Tap the row → switch active account
+            // Tap the red ✕ → disconnect that account only
+            Section("CONNECTED ACCOUNTS") {
+                ForEach(authVM.savedAccounts) { acc in
+                    Button {
+                        // Row tap = switch active account (never disconnects)
+                        authVM.setActiveAccount(acc.provider)
+                    } label: {
+                        HStack(spacing: 10) {
+                            // Active badge
+                            ZStack {
+                                Circle()
+                                    .fill(acc.isActive ? themeVM.accent : Color.clear)
+                                    .frame(width: 18, height: 18)
+                                Image(systemName: acc.isActive ? "checkmark" : "circle")
+                                    .font(.system(size: acc.isActive ? 9 : 12, weight: .bold))
+                                    .foregroundColor(acc.isActive ? .black : themeVM.dim)
+                            }
+
+                            // Provider icon
+                            Image(systemName: acc.provider == "github"
+                                ? "chevron.left.forwardslash.chevron.right" : "apple.logo")
+                                .font(.system(size: 13))
+                                .foregroundColor(themeVM.accent)
+
+                            // Account info
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(acc.username)
+                                    .font(.system(size: 13, weight: acc.isActive ? .semibold : .regular))
+                                    .foregroundColor(acc.isActive ? themeVM.accent : themeVM.text)
+                                Text(acc.isActive ? "Active session" : "Tap to switch")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
+                            }
+
+                            Spacer()
+
+                            // Use account name toggle
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("Use name")
+                                    .font(.system(size: 8)).foregroundColor(themeVM.dim)
+                                Toggle("", isOn: Binding(
+                                    get: { authVM.useAccountName(provider: acc.provider) },
+                                    set: { authVM.setUseAccountName($0, provider: acc.provider) }
+                                ))
+                                .labelsHidden()
+                                .tint(themeVM.accent)
+                                .scaleEffect(0.7)
+                            }
+
+                            // Red glowing disconnect button
+                            Button {
+                                authVM.disconnectAccount(acc.provider)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.red)
+                                    .shadow(color: .red.opacity(0.6), radius: 4, x: 0, y: 0)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Section("ADD ACCOUNT") {
+                // Add GitHub if not connected
+                if !authVM.githubConnected {
+                    Button {
+                        Task { await authVM.startGitHubDeviceFlow() }
+                    } label: {
+                        Label("Connect GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .foregroundColor(themeVM.accent)
+                    }
+                }
+                // Add Apple if not connected
+                if authVM.appleUserId.isEmpty {
+                    // Use UIViewRepresentable to avoid "not in hierarchy" crash from sidebar
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Connect Apple ID", systemImage: "apple.logo")
+                            .font(.system(size: 11))
+                            .foregroundColor(themeVM.accent)
+                        AppleSignInButton(
+                            onRequest: { req in authVM.prepareAppleRequest(req) },
+                            onCompletion: { result in authVM.handleAppleCompletion(result) }
+                        )
+                        .frame(height: 44)
+                        .cornerRadius(8)
+                    }
+                }
+            }
+
+            Section {
+                Button(role: .destructive) { authVM.signOut() } label: {
+                    Label("Sign Out All", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
+
+struct IDEDrawerAboutTab: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+
+    var body: some View {
+        List {
+            Section {
+                Link(destination: URL(string: "https://radicaldeepscale.com")!) {
+                    Label("Radical Deepscale", systemImage: "globe")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://dartmeadow.com")!) {
+                    Label("DART Meadow", systemImage: "globe")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://github.com/DART-Skyboard/AshtreeIDE-iOS")!) {
+                    Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://radicaldeepscale.com/ashtreeide.html")!) {
+                    Label("Ash Tree IDE Web", systemImage: "safari")
+                        .foregroundColor(themeVM.accent)
+                }
+                Link(destination: URL(string: "https://leatr.xyz")!) {
+                    Label("LEATR", systemImage: "book")
+                        .foregroundColor(themeVM.accent)
+                }
+            } header: {
+                Text("LINKS").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+
+            Section {
+                LabeledContent("App", value: "Ash Tree IDE").foregroundColor(themeVM.text)
+                LabeledContent("Version",
+                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4.0")
+                    .foregroundColor(themeVM.text)
+                LabeledContent("Compiler", value: "LEATR v2").foregroundColor(themeVM.text)
+                LabeledContent("Author", value: "Justin Craig Venable").foregroundColor(themeVM.text)
+                LabeledContent("Company", value: "DART Meadow | Radical Deepscale LLC.").foregroundColor(themeVM.text)
+            } header: {
+                Text("ABOUT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
