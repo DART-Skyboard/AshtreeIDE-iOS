@@ -132,6 +132,7 @@ public final class IDEState: ObservableObject {
 
     public func openFile(_ file: IDEGitHubFile) async {
         guard file.type == "file" else { return }
+        await MainActor.run { IDELanguageStore.shared.setEnvFromFilename(file.name) }
         let username = KeychainHelper.load(key: "ide_github_username") ?? ""
         let repo = currentRepo?.name ?? ""
         let owner = currentRepo.map { String($0.fullName.split(separator: "/").first ?? Substring(username)) } ?? username
@@ -201,6 +202,7 @@ public final class IDEState: ObservableObject {
     public func openLocalFile(_ name: String) {
         if let content = UserDefaults.standard.string(forKey: "ide_local_\(name)") {
             sourceCode = content; currentFile = name; isDirty = false; selectedTab = .editor
+            Task { @MainActor in IDELanguageStore.shared.setEnvFromFilename(name) }
         }
     }
 }
