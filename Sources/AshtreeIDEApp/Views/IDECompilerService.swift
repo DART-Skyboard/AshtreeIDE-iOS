@@ -140,16 +140,15 @@ public final class IDECompilerService: ObservableObject {
         case "php":                   return .webView  // PHP-WASM
         case "sql":                   return .webView  // SQL.js WASM
 
-        // Remote compilation via Judge0
-        case "cpp", "c", "csharp":   return .judge0
-        case "java", "kotlin":        return .judge0
-        case "go", "rust":            return .judge0
-        case "ruby", "bash":          return .judge0
-        case "r":                     return .judge0
-        case "swift":                 return .judge0
-
-        // Dart via Piston (Judge0 CE doesn't include Dart)
+        // Remote compilation via Piston (free, no auth, most reliable)
+        case "cpp", "c", "csharp":   return .piston
+        case "java", "kotlin":        return .piston
+        case "go", "rust":            return .piston
+        case "ruby", "bash":          return .piston
+        case "r":                     return .piston
+        case "swift":                 return .piston
         case "dart":                  return .piston
+        case "typescript":            return .piston
 
         default:                      return .notSupported("Language '\(language)' is not yet supported.")
         }
@@ -405,47 +404,47 @@ initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.2/dist/${
         }
     }
 
-    // MARK: - Judge0 Remote Compiler
+    // MARK: - Judge0 Remote Compiler (secondary — requires RapidAPI key)
 
     private func executeJudge0(code: String, language: String, stdin: String) async {
+        // Judge0 CE requires a RapidAPI key. Without it returns 401.
+        // We try it but fall back to Piston immediately on auth failure.
         guard let langId = Judge0Language.from(languageId: language) else {
             await executePiston(code: code, language: language, stdin: stdin)
             return
         }
 
-        // Encode source + stdin as base64
-        let srcB64  = Data(code.utf8).base64EncodedString()
+        let srcB64   = Data(code.utf8).base64EncodedString()
         let stdinB64 = Data(stdin.utf8).base64EncodedString()
-
-        // Submit submission
         let submitURL = URL(string: "\(judge0Base)/submissions?base64_encoded=true&wait=true")!
         var req = URLRequest(url: submitURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Judge0 CE public endpoint — no API key needed (rate limited)
         req.setValue("judge0-ce.p.rapidapi.com", forHTTPHeaderField: "x-rapidapi-host")
-
-        let body: [String: Any] = [
-            "language_id": langId.rawValue,
-            "source_code": srcB64,
-            "stdin":        stdinB64,
-            "base64_encoded": true,
-            "cpu_time_limit": 10,
-            "memory_limit":   256000
-        ]
-
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        // Optional: set x-rapidapi-key from UserDefaults if user has configured one
+        if let key = UserDefaults.standard.string(forKey: "ide_judge0_key"), !key.isEmpty {
+            req.setValue(key, forHTTPHeaderField: "x-rapidapi-key")
+        }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "language_id": langId.rawValue, "source_code": srcB64,
+            "stdin": stdinB64, "base64_encoded": true,
+            "cpu_time_limit": 10, "memory_limit": 256000
+        ] as [String: Any])
 
         do {
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            // 401/403/429 → key missing or rate limited → go to Piston
+            if statusCode == 401 || statusCode == 403 || statusCode == 429 {
+                await executePiston(code: code, language: language, stdin: stdin)
+                return
+            }
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                // Judge0 unavailable — fall back to Piston
                 await executePiston(code: code, language: language, stdin: stdin)
                 return
             }
             await parseJudge0Response(json, language: language)
         } catch {
-            // Network error — fall back to Piston
             await executePiston(code: code, language: language, stdin: stdin)
         }
     }
@@ -475,22 +474,25 @@ initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.2/dist/${
 
     private func executePiston(code: String, language: String, stdin: String) async {
         // Map language ID to Piston language name + version
+        // Piston API — free, no auth required, primary for compiled languages
+        // Versions sourced from: https://emkc.org/api/v2/piston/runtimes
         let pistonMap: [String: (String, String)] = [
-            "cpp":    ("c++", "10.2.0"),
-            "c":      ("c",   "10.2.0"),
-            "java":   ("java","15.0.2"),
-            "python": ("python", "3.10.0"),
-            "python_ml": ("python", "3.10.0"),
-            "go":     ("go",  "1.16.2"),
-            "rust":   ("rust","1.50.0"),
-            "swift":  ("swift","5.3.3"),
-            "kotlin": ("kotlin","1.4.31"),
-            "ruby":   ("ruby","3.0.0"),
-            "bash":   ("bash","5.1.0"),
-            "dart":   ("dart","2.12.0"),
-            "r":      ("r",   "4.0.5"),
-            "php":    ("php", "8.0.0"),
-            "csharp": ("csharp","6.12.0"),
+            "cpp":       ("c++",    "*"),   // latest
+            "c":         ("c",      "*"),
+            "java":      ("java",   "*"),
+            "python":    ("python", "*"),
+            "python_ml": ("python", "*"),
+            "go":        ("go",     "*"),
+            "rust":      ("rust",   "*"),
+            "swift":     ("swift",  "*"),
+            "kotlin":    ("kotlin", "*"),
+            "ruby":      ("ruby",   "*"),
+            "bash":      ("bash",   "*"),
+            "dart":      ("dart",   "*"),
+            "r":         ("r",      "*"),
+            "php":       ("php",    "*"),
+            "csharp":    ("mono",   "*"),   // C# on Piston uses "mono"
+            "typescript":("typescript","*"),
         ]
 
         guard let (pistonLang, version) = pistonMap[language] else {
@@ -572,7 +574,12 @@ struct IDEExecutionOutputView: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
     @StateObject private var service = IDECompilerService.shared
-    @State private var webLoading = false
+    @State private var webLoading  = false
+    @State private var desktopMode = false  // mobile/desktop view toggle
+
+    // Viewport widths: mobile=390pt, desktop=1280pt (scales inside WKWebView)
+    private let mobileWidth:  CGFloat = 390
+    private let desktopWidth: CGFloat = 1280
 
     var body: some View {
         VStack(spacing: 0) {
@@ -590,19 +597,59 @@ struct IDEExecutionOutputView: View {
                     Text(outputHeader(r))
                         .font(.system(size:9,weight:.semibold,design:.monospaced))
                         .foregroundColor(themeVM.dim).kerning(1.5)
-                    Spacer()
-                    if !r.time.isEmpty && r.time != "–" {
-                        Text("\(r.time)  \(r.memory)")
-                            .font(.system(size:8,design:.monospaced))
-                            .foregroundColor(themeVM.dim)
-                    }
                 } else {
                     Text("◈ OUTPUT")
                         .font(.system(size:9,weight:.semibold,design:.monospaced))
                         .foregroundColor(themeVM.dim).kerning(2)
-                    Spacer()
                 }
+                Spacer()
+
+                // Mobile / Desktop toggle (only for web output)
+                if service.result?.webHTML != nil {
+                    HStack(spacing: 0) {
+                        Button {
+                            withAnimation(.spring(response:0.25,dampingFraction:0.85)) {
+                                desktopMode = false
+                            }
+                        } label: {
+                            Image(systemName: "iphone")
+                                .font(.system(size:11))
+                                .foregroundColor(!desktopMode ? .black : themeVM.dim)
+                                .padding(.horizontal,8).padding(.vertical,5)
+                                .background(!desktopMode
+                                    ? Color(hex: IDELanguageStore.shared.activeEnv.color)
+                                    : Color.clear)
+                                .cornerRadius(6)
+                        }
+                        Button {
+                            withAnimation(.spring(response:0.25,dampingFraction:0.85)) {
+                                desktopMode = true
+                            }
+                        } label: {
+                            Image(systemName: "desktopcomputer")
+                                .font(.system(size:11))
+                                .foregroundColor(desktopMode ? .black : themeVM.dim)
+                                .padding(.horizontal,8).padding(.vertical,5)
+                                .background(desktopMode
+                                    ? Color(hex: IDELanguageStore.shared.activeEnv.color)
+                                    : Color.clear)
+                                .cornerRadius(6)
+                        }
+                    }
+                    .background(Color(hex:"#161b22"))
+                    .cornerRadius(7)
+                    .overlay(RoundedRectangle(cornerRadius:7)
+                        .stroke(Color(hex:"#30363d"),lineWidth:0.5))
+                }
+
+                if let r = service.result, !r.time.isEmpty && r.time != "–" {
+                    Text(r.time)
+                        .font(.system(size:8,design:.monospaced))
+                        .foregroundColor(themeVM.dim)
+                }
+
                 Button {
+                    IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
                     let lang = IDELanguageStore.shared.activeEnv.id
                     Task { await service.execute(code: ideVM.sourceCode, language: lang) }
                 } label: {
@@ -631,14 +678,37 @@ struct IDEExecutionOutputView: View {
                 Spacer()
             } else if let r = service.result {
                 if let html = r.webHTML {
-                    // Render in WKWebView
-                    IDEWebOutputView(html: html, isLoading: $webLoading)
+                    // Web render with mobile/desktop viewport scaling
+                    GeometryReader { geo in
+                        let viewW  = geo.size.width
+                        let targetW: CGFloat = desktopMode ? desktopWidth : mobileWidth
+                        let scale  = viewW / targetW
+                        // Inject viewport meta to force desktop or mobile rendering
+                        let viewportMeta = desktopMode
+                            ? "<meta name=\"viewport\" content=\"width=1280\">"
+                            : "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                        // Insert/replace viewport meta in the HTML
+                        let adjustedHTML: String
+                        if html.contains("<meta name=\"viewport\"") || html.contains("<meta name='viewport'") {
+                            adjustedHTML = html
+                                .replacingOccurrences(of: "<meta name=\"viewport\"[^>]*>",
+                                    with: viewportMeta,
+                                    options: .regularExpression)
+                        } else if html.contains("<head>") {
+                            adjustedHTML = html.replacingOccurrences(of: "<head>",
+                                with: "<head>\(viewportMeta)")
+                        } else {
+                            adjustedHTML = viewportMeta + html
+                        }
+                        IDEWebOutputView(html: adjustedHTML, isLoading: $webLoading)
+                            .id("\(desktopMode)") // force WKWebView reload on mode change
+                    }
                 } else {
-                    // Text output (terminal-style)
+                    // Terminal-style text output
                     ScrollView {
                         VStack(alignment:.leading, spacing:0) {
                             if !r.compileError.isEmpty {
-                                outputBlock(r.compileError, label:"COMPILE ERROR", color:".red")
+                                outputBlock(r.compileError, label:"COMPILE ERROR", color:"#ff6b6b")
                             }
                             if !r.stdout.isEmpty {
                                 outputBlock(r.stdout, label:"STDOUT", color:"#00ffcc")
@@ -649,8 +719,7 @@ struct IDEExecutionOutputView: View {
                             if r.stdout.isEmpty && r.stderr.isEmpty && r.compileError.isEmpty {
                                 Text("(No output)")
                                     .font(.system(size:11,design:.monospaced))
-                                    .foregroundColor(themeVM.dim)
-                                    .padding(14)
+                                    .foregroundColor(themeVM.dim).padding(14)
                             }
                         }
                     }
@@ -666,11 +735,10 @@ struct IDEExecutionOutputView: View {
                     Text("Press RUN to execute \(env.name)")
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
-                    if isRemoteLanguage(env.id) {
-                        Text("⟳ Compiled remotely via Judge0 / Piston")
-                            .font(.system(size:9,design:.monospaced))
-                            .foregroundColor(themeVM.dim.opacity(0.6))
-                    }
+                    Text("⟳ Compiled via Piston (C++, Java, Go, Rust…) or WebView (HTML, Python, JS)")
+                        .font(.system(size:9,design:.monospaced))
+                        .foregroundColor(themeVM.dim.opacity(0.5))
+                        .multilineTextAlignment(.center).padding(.horizontal,20)
                 }
                 .frame(maxWidth:.infinity,maxHeight:.infinity)
                 .background(themeVM.bg)
@@ -684,21 +752,16 @@ struct IDEExecutionOutputView: View {
         return "✓ COMPLETE"
     }
 
-    private func isRemoteLanguage(_ id: String) -> Bool {
-        ["cpp","c","java","kotlin","go","rust","swift","csharp","ruby","bash","dart","r"].contains(id)
-    }
-
     @ViewBuilder
     private func outputBlock(_ text: String, label: String, color: String) -> some View {
         VStack(alignment:.leading, spacing:4) {
             Text(label)
                 .font(.system(size:7,weight:.bold,design:.monospaced))
-                .foregroundColor(Color(hex: color.hasPrefix("#") ? color : "#ff6b6b"))
-                .kerning(1.5)
+                .foregroundColor(Color(hex:color)).kerning(1.5)
                 .padding(.horizontal,14).padding(.top,10)
             Text(text)
                 .font(.system(size:11,design:.monospaced))
-                .foregroundColor(color == "#00ffcc" ? Color(hex:"#00ffcc") : Color(hex:"#ff6b6b"))
+                .foregroundColor(Color(hex:color))
                 .textSelection(.enabled)
                 .padding(.horizontal,14).padding(.bottom,10)
         }
