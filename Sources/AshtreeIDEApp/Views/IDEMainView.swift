@@ -157,7 +157,7 @@ struct IDETabContent: View {
                 case .output:
                     // Route to real language render or Ash compiler output
                     if IDELanguageStore.shared.activeEnv.id != "ash" {
-                        IDERunOutputPanel()
+                        IDEExecutionOutputView()
                             .environmentObject(themeVM)
                             .environmentObject(ideVM)
                     } else {
