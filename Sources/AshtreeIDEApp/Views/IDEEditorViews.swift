@@ -36,6 +36,7 @@ struct IDEEditorActionBar: View {
                 ActionChip(label: "▶ BUILD & RUN",
                            color: Color(hex: IDELanguageStore.shared.activeEnv.color).opacity(0.9),
                            busy: ideVM.isCompiling || IDECompilerService.shared.isRunning) {
+                    IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
                     let lang = IDELanguageStore.shared.activeEnv.id
                     if lang == "ash" {
                         Task { await ideVM.buildAndRun() }
