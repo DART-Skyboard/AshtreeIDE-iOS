@@ -941,8 +941,16 @@ struct IDEDrawerReposTab2: View {
                     List(ideVM.repoFiles, id: \.path) { file in
                         Button {
                             let ext = (file.name as NSString).pathExtension.lowercased()
-                            let previewExts = ["png","jpg","jpeg","gif","webp","svg",
-                                               "pdf","mp4","mov","heic","bmp","tiff"]
+                            let previewExts = [
+                                                // Images
+                                                "png","jpg","jpeg","gif","webp","heic","bmp","tiff","svg","ico",
+                                                // Video
+                                                "mp4","mov","m4v","avi","mkv",
+                                                // Documents
+                                                "pdf",
+                                                // 3D files
+                                                "glb","gltf","obj","fbx","stl","usdz","dae","ply","3ds","abc"
+                                            ]
                             if file.type == "dir" {
                                 Task { await ideVM.loadFiles(repo: selectedRepo, path: file.path) }
                             } else if previewExts.contains(ext) {
@@ -1041,57 +1049,317 @@ struct IDEFilePreviewSheet: View {
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @EnvironmentObject var ideVM:   IDEState
     @Environment(\.dismiss) var dismiss
-    @State private var imageData: Data? = nil
-    @State private var isLoading = true
-    @State private var errorMsg: String? = nil
+    @State private var fileData:  Data? = nil
+    @State private var isLoading  = true
+    @State private var errorMsg:  String? = nil
 
     var ext: String { (file.name as NSString).pathExtension.lowercased() }
-    var isImage: Bool { ["png","jpg","jpeg","gif","webp","heic","bmp","tiff"].contains(ext) }
-    var isSVG:   Bool { ext == "svg" }
-    var isPDF:   Bool { ext == "pdf" }
-    var isVideo: Bool { ["mp4","mov","m4v"].contains(ext) }
+
+    // File type categories
+    var isRasterImage: Bool { ["png","jpg","jpeg","gif","webp","heic","bmp","tiff","ico"].contains(ext) }
+    var isSVG:    Bool { ext == "svg" }
+    var isPDF:    Bool { ext == "pdf" }
+    var isVideo:  Bool { ["mp4","mov","m4v","avi","mkv"].contains(ext) }
+    // 3D types that Three.js can render directly via data URL
+    var is3DWeb:  Bool { ["glb","gltf","obj","stl","ply"].contains(ext) }
+    // 3D types we show metadata for (no web loader available easily)
+    var is3DMeta: Bool { ["fbx","usdz","dae","3ds","abc"].contains(ext) }
+
+    var fileSize: String {
+        if let sz = file.size {
+            if sz < 1024 { return "\(sz) B" }
+            if sz < 1_048_576 { return String(format:"%.1f KB", Double(sz)/1024) }
+            return String(format:"%.1f MB", Double(sz)/1_048_576)
+        }
+        return "–"
+    }
 
     var body: some View {
         NavigationView {
             ZStack {
                 Color(hex:"#0d1117").ignoresSafeArea()
+
                 if isLoading {
                     VStack(spacing:12) {
                         ProgressView().tint(themeVM.accent)
                         Text("Loading \(file.name)…")
                             .font(.system(size:11,design:.monospaced))
                             .foregroundColor(themeVM.dim)
+                        if let sz = file.size, sz > 5_000_000 {
+                            Text("Large file (\(fileSize)) — may take a moment")
+                                .font(.system(size:9,design:.monospaced))
+                                .foregroundColor(themeVM.dim.opacity(0.6))
+                        }
                     }
+
                 } else if let err = errorMsg {
-                    VStack(spacing:8) {
-                        Image(systemName:"exclamationmark.triangle")
-                            .font(.system(size:28)).foregroundColor(.orange)
-                        Text(err).font(.system(size:11)).foregroundColor(themeVM.dim)
+                    VStack(spacing:12) {
+                        Image(systemName:"exclamationmark.triangle.fill")
+                            .font(.system(size:32)).foregroundColor(.orange)
+                        Text(err)
+                            .font(.system(size:11,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                            .multilineTextAlignment(.center).padding(.horizontal,24)
                     }
-                } else if isImage, let data = imageData, let uiImg = UIImage(data: data) {
+
+                } else if isRasterImage, let data = fileData,
+                          let uiImg = UIImage(data: data) {
+                    // ── Raster image ──────────────────────────────
                     ScrollView([.horizontal,.vertical]) {
-                        Image(uiImage: uiImg).resizable().scaledToFit().padding()
+                        VStack {
+                            Image(uiImage: uiImg)
+                                .resizable().scaledToFit()
+                                .padding()
+                            Text("\(Int(uiImg.size.width)) × \(Int(uiImg.size.height)) px  ·  \(fileSize)")
+                                .font(.system(size:9,design:.monospaced))
+                                .foregroundColor(themeVM.dim)
+                                .padding(.bottom,8)
+                        }
                     }
-                } else if (isSVG || isPDF || isVideo), let data = imageData {
-                    let b64  = data.base64EncodedString()
-                    let mime = isPDF ? "application/pdf" : isVideo ? "video/mp4" : "image/svg+xml"
+
+                } else if isSVG, let data = fileData {
+                    // ── SVG via WKWebView ─────────────────────────
+                    let b64 = data.base64EncodedString()
                     let html = """
 <!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{margin:0;background:#0d1117;display:flex;align-items:center;justify-content:center;min-height:100vh;}
-img,embed,video{max-width:100%;max-height:90vh;}</style>
+<style>body{margin:0;background:#0d1117;display:flex;align-items:center;
+justify-content:center;min-height:100vh;}
+img{max-width:100%;max-height:90vh;}</style>
 </head><body>
-\(isVideo ? "<video controls autoplay playsinline>" : "")
-<\(isVideo ? "source" : isPDF ? "embed type=\"application/pdf\" width=\"100%\" height=\"100%\"" : "img")
-  src="data:\(mime);base64,\(b64)"\(isVideo ? " type=\"video/mp4\"" : "")/>
-\(isVideo ? "</video>" : "")
+<img src="data:image/svg+xml;base64,\(b64)"/>
 </body></html>
 """
                     IDEWebOutputView(html: html, isLoading: .constant(false))
+
+                } else if isPDF, let data = fileData {
+                    // ── PDF via WKWebView ─────────────────────────
+                    let b64 = data.base64EncodedString()
+                    let html = """
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{margin:0;padding:0;}body{background:#0d1117;}
+embed{width:100vw;height:100vh;}</style>
+</head><body>
+<embed src="data:application/pdf;base64,\(b64)"
+       type="application/pdf" width="100%" height="100%"/>
+</body></html>
+"""
+                    IDEWebOutputView(html: html, isLoading: .constant(false))
+
+                } else if isVideo, let data = fileData {
+                    // ── Video via WKWebView ───────────────────────
+                    let b64   = data.base64EncodedString()
+                    let mime  = ext == "mov" ? "video/quicktime" : "video/mp4"
+                    let html = """
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{margin:0;}body{background:#000;display:flex;align-items:center;
+justify-content:center;height:100vh;}
+video{max-width:100%;max-height:100vh;}</style>
+</head><body>
+<video controls autoplay playsinline>
+  <source src="data:\(mime);base64,\(b64)" type="\(mime)">
+</video></body></html>
+"""
+                    IDEWebOutputView(html: html, isLoading: .constant(false))
+
+                } else if is3DWeb, let data = fileData {
+                    // ── 3D viewer via Three.js in WKWebView ───────
+                    // GLB/GLTF/OBJ/STL/PLY all supported
+                    let b64  = data.base64EncodedString()
+                    let mime = ext == "glb" ? "model/gltf-binary"
+                             : ext == "gltf" ? "model/gltf+json"
+                             : ext == "obj"  ? "text/plain"
+                             : ext == "stl"  ? "model/stl"
+                             : "application/octet-stream"
+                    let loaderType = ext == "glb" || ext == "gltf" ? "GLTF"
+                                   : ext == "obj"  ? "OBJ"
+                                   : ext == "stl"  ? "STL"
+                                   : ext == "ply"  ? "PLY"
+                                   : "GLTF"
+                    let html = """
+<!DOCTYPE html><html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0d1117;overflow:hidden;width:100vw;height:100vh;}
+#info{position:fixed;bottom:8px;left:0;right:0;text-align:center;
+      font:10px monospace;color:rgba(255,255,255,0.4);pointer-events:none;}
+#err{position:fixed;top:8px;left:8px;right:8px;color:#ff6b6b;
+     font:10px monospace;display:none;}
+</style>
+</head><body>
+<div id="err"></div>
+<div id="info">\(file.name) · \(fileSize) · drag to orbit · pinch to zoom</div>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
+import { STLLoader }     from 'three/addons/loaders/STLLoader.js';
+import { PLYLoader }     from 'three/addons/loaders/PLYLoader.js';
+
+const err = document.getElementById('err');
+window.onerror = (m,s,l) => { err.style.display='block'; err.textContent='Error: '+m; };
+
+// Scene setup
+const scene    = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1117);
+const camera   = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.001, 10000);
+camera.position.set(0, 1, 3);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// Orbit controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enableZoom = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.8;
+
+// Lighting
+const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambient);
+const dir1 = new THREE.DirectionalLight(0xffffff, 1.2);
+dir1.position.set(5, 10, 7);
+scene.add(dir1);
+const dir2 = new THREE.DirectionalLight(0x8888ff, 0.4);
+dir2.position.set(-5, -2, -5);
+scene.add(dir2);
+
+// Grid
+const grid = new THREE.GridHelper(10, 20, 0x1a2a3a, 0x1a2a3a);
+scene.add(grid);
+
+// Decode base64 → ArrayBuffer
+const b64 = "\(b64)";
+const bin = atob(b64);
+const buf = new Uint8Array(bin.length);
+for (let i=0; i<bin.length; i++) buf[i] = bin.charCodeAt(i);
+const ab = buf.buffer;
+
+// Load model
+function fitToView(obj) {
+  const box  = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3()).length();
+  const ctr  = box.getCenter(new THREE.Vector3());
+  obj.position.sub(ctr);
+  grid.position.y = -box.getSize(new THREE.Vector3()).y / 2;
+  camera.near = size / 100;
+  camera.far  = size * 100;
+  camera.position.copy(ctr);
+  camera.position.z += size * 1.5;
+  camera.position.y += size * 0.4;
+  camera.updateProjectionMatrix();
+  controls.target.copy(ctr.setY(0));
+  controls.update();
+}
+
+const loaderType = "\(loaderType)";
+if (loaderType === "GLTF") {
+  const loader = new GLTFLoader();
+  loader.parse(ab, '', gltf => {
+    scene.add(gltf.scene);
+    fitToView(gltf.scene);
+    if (gltf.animations?.length) {
+      const mixer = new THREE.AnimationMixer(gltf.scene);
+      gltf.animations.forEach(clip => mixer.clipAction(clip).play());
+      renderer.setAnimationLoop(dt => { mixer.update(0.016); controls.update(); renderer.render(scene,camera); });
+      return;
+    }
+  }, e => { err.style.display='block'; err.textContent='Load error: '+e; });
+} else if (loaderType === "OBJ") {
+  const geo = new OBJLoader().parse(new TextDecoder().decode(ab));
+  scene.add(geo); fitToView(geo);
+} else if (loaderType === "STL") {
+  const geo = new STLLoader().parse(ab);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, roughness:0.5, metalness:0.3 });
+  const mesh = new THREE.Mesh(geo, mat);
+  scene.add(mesh); fitToView(mesh);
+} else if (loaderType === "PLY") {
+  const geo = new PLYLoader().parse(ab);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaff, vertexColors: geo.hasAttribute('color') });
+  const mesh = new THREE.Mesh(geo, mat);
+  scene.add(mesh); fitToView(mesh);
+}
+
+// Render loop
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene,camera); });
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script></body></html>
+"""
+                    IDEWebOutputView(html: html, isLoading: .constant(false))
+
+                } else if is3DMeta {
+                    // ── 3D format info card (FBX, USDZ, DAE, etc.) ──
+                    VStack(spacing:20) {
+                        Image(systemName: "cube.fill")
+                            .font(.system(size:52))
+                            .foregroundColor(themeVM.accent.opacity(0.6))
+                        VStack(spacing:6) {
+                            Text(file.name)
+                                .font(.system(size:14,weight:.semibold,design:.monospaced))
+                                .foregroundColor(themeVM.text)
+                            Text("\(ext.uppercased()) · \(fileSize)")
+                                .font(.system(size:10,design:.monospaced))
+                                .foregroundColor(themeVM.dim)
+                        }
+                        Text(ext == "usdz" ? "USDZ files can be viewed in AR Quick Look — download and open with Files app."
+                           : ext == "fbx"  ? "FBX format requires Autodesk tools or Unity/Unreal to preview. Export as GLB for in-app preview."
+                           : ext == "dae"  ? "Collada (DAE) files can be converted to GLB using Blender for in-app preview."
+                           : "This 3D format can be converted to GLB for in-app preview.")
+                            .font(.system(size:10,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal,24)
+                        // AR Quick Look button for USDZ
+                        if ext == "usdz", let dlUrl = file.downloadURL, let url = URL(string: dlUrl) {
+                            Link(destination: url) {
+                                Label("Open in AR Quick Look", systemImage:"arkit")
+                                    .font(.system(size:11,weight:.semibold))
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal,20).padding(.vertical,10)
+                                    .background(themeVM.accent).cornerRadius(10)
+                            }
+                        }
+                    }
+                    .frame(maxWidth:.infinity,maxHeight:.infinity)
+
                 } else {
-                    Text("Preview not available for this file type.")
-                        .font(.system(size:11,design:.monospaced))
-                        .foregroundColor(themeVM.dim)
+                    VStack(spacing:12) {
+                        Image(systemName:"doc.fill")
+                            .font(.system(size:40)).foregroundColor(themeVM.dim.opacity(0.4))
+                        Text(file.name)
+                            .font(.system(size:12,weight:.semibold,design:.monospaced))
+                            .foregroundColor(themeVM.text)
+                        Text(fileSize)
+                            .font(.system(size:9,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                        Text("Preview not available for .\(ext) files")
+                            .font(.system(size:10,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                    }
+                    .frame(maxWidth:.infinity,maxHeight:.infinity)
                 }
             }
             .navigationTitle(file.name)
@@ -1100,275 +1368,32 @@ img,embed,video{max-width:100%;max-height:90vh;}</style>
                 ToolbarItem(placement:.navigationBarLeading) {
                     Button("Done") { dismiss() }.foregroundColor(themeVM.accent)
                 }
+                ToolbarItem(placement:.navigationBarTrailing) {
+                    if let dlUrl = file.downloadURL, let url = URL(string: dlUrl) {
+                        Link(destination: url) {
+                            Image(systemName:"arrow.up.forward.square")
+                                .foregroundColor(themeVM.dim)
+                        }
+                    }
+                }
             }
         }
-        .task { await loadPreview() }
+        .task { await loadFile() }
     }
 
-    private func loadPreview() async {
+    private func loadFile() async {
         isLoading = true
         defer { isLoading = false }
-        guard let dlUrl = file.downloadURL,
-              let url = URL(string: dlUrl) else {
+        // Meta-only 3D types — no download needed
+        if is3DMeta { return }
+        guard let dlUrl = file.downloadURL, let url = URL(string: dlUrl) else {
             errorMsg = "No download URL available."; return
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            await MainActor.run { imageData = data }
+            await MainActor.run { fileData = data }
         } catch {
             await MainActor.run { errorMsg = error.localizedDescription }
         }
-    }
-}
-
-
-struct IDEDrawerSettingsTab: View {
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-    @EnvironmentObject var ideVM:   IDEState
-
-    var body: some View {
-        List {
-            Section {
-                // Theme picker
-                Picker("Theme", selection: $themeVM.current) {
-                    ForEach(IDEThemeViewModel.Theme.allCases, id: \.self) { t in
-                        HStack {
-                            Circle().fill(t.accent).frame(width: 8, height: 8)
-                            Text(t.rawValue).tag(t)
-                        }
-                    }
-                }
-                .tint(themeVM.accent)
-            } header: {
-                Text("APPEARANCE").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
-            }
-
-            Section {
-                LabeledContent("Compiler", value: "LEATR v2.0").foregroundColor(themeVM.text)
-                LabeledContent("Switch Eq.", value: "(xa²√xa) ± 1").foregroundColor(themeVM.text)
-                LabeledContent("LEATR", value: "25 Orders of Operation").foregroundColor(themeVM.text)
-                LabeledContent("Tools 1-7", value: "Maze · Puzzle · Envelope · Hammer · Stick · Knife · Scissors").foregroundColor(themeVM.text)
-                LabeledContent("Math 8-19", value: "Parentheses · Exponents · ×÷ · +- · Log · Trig · Temp · Vel · Pressure · Mass · Photosyn.").foregroundColor(themeVM.text)
-                LabeledContent("Senses 20-25", value: "Touch · Taste · Vision · Smell · Hear · Proprioception").foregroundColor(themeVM.text)
-                LabeledContent("BRPN", value: "Buoyancy Reflex Pendulum Node").foregroundColor(themeVM.text)
-                LabeledContent("Shells", value: "Aerospace / Maritime / Geological").foregroundColor(themeVM.text)
-                LabeledContent("Maze", value: "LEMAC + D3.e algorithm").foregroundColor(themeVM.text)
-            } header: {
-                Text("COMPILER").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-}
-
-struct IDEDrawerProfileTab: View {
-    @EnvironmentObject var authVM:  IDEAuthViewModel
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-    @State private var editingUsername = false
-    @State private var draftUsername   = ""
-
-    var body: some View {
-        List {
-            // ── App Username (editable) ──────────────────────────
-            Section {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("App Username")
-                            .font(.system(size: 10)).foregroundColor(themeVM.dim)
-                        if editingUsername {
-                            TextField("Username", text: $draftUsername)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(themeVM.accent)
-                                .onSubmit {
-                                    let trimmed = draftUsername.trimmingCharacters(in: .whitespaces)
-                                    if !trimmed.isEmpty {
-                                        authVM.appUsername = trimmed
-                                        KeychainHelper.save(key: "ide_app_username", value: trimmed)
-                                        authVM.username = trimmed
-                                    }
-                                    editingUsername = false
-                                }
-                                .autocorrectionDisabled()
-                                .autocapitalization(.none)
-                        } else {
-                            Text(authVM.appUsername.isEmpty ? authVM.username : authVM.appUsername)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(themeVM.text)
-                        }
-                    }
-                    Spacer()
-                    Button {
-                        if editingUsername {
-                            let trimmed = draftUsername.trimmingCharacters(in: .whitespaces)
-                            if !trimmed.isEmpty {
-                                authVM.appUsername = trimmed
-                                KeychainHelper.save(key: "ide_app_username", value: trimmed)
-                                authVM.username = trimmed
-                            }
-                            editingUsername = false
-                        } else {
-                            draftUsername   = authVM.appUsername.isEmpty ? authVM.username : authVM.appUsername
-                            editingUsername = true
-                        }
-                    } label: {
-                        Text(editingUsername ? "Save" : "Edit")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(themeVM.accent)
-                    }
-                }
-            } header: {
-                Text("ACCOUNT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
-            }
-
-            // ── Connected Accounts ───────────────────────────────
-            // Tap the row → switch active account
-            // Tap the red ✕ → disconnect that account only
-            Section("CONNECTED ACCOUNTS") {
-                ForEach(authVM.savedAccounts) { acc in
-                    Button {
-                        // Row tap = switch active account (never disconnects)
-                        authVM.setActiveAccount(acc.provider)
-                    } label: {
-                        HStack(spacing: 10) {
-                            // Active badge
-                            ZStack {
-                                Circle()
-                                    .fill(acc.isActive ? themeVM.accent : Color.clear)
-                                    .frame(width: 18, height: 18)
-                                Image(systemName: acc.isActive ? "checkmark" : "circle")
-                                    .font(.system(size: acc.isActive ? 9 : 12, weight: .bold))
-                                    .foregroundColor(acc.isActive ? .black : themeVM.dim)
-                            }
-
-                            // Provider icon
-                            Image(systemName: acc.provider == "github"
-                                ? "chevron.left.forwardslash.chevron.right" : "apple.logo")
-                                .font(.system(size: 13))
-                                .foregroundColor(themeVM.accent)
-
-                            // Account info
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(acc.username)
-                                    .font(.system(size: 13, weight: acc.isActive ? .semibold : .regular))
-                                    .foregroundColor(acc.isActive ? themeVM.accent : themeVM.text)
-                                Text(acc.isActive ? "Active session" : "Tap to switch")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(acc.isActive ? themeVM.accent : themeVM.dim)
-                            }
-
-                            Spacer()
-
-                            // Use account name toggle
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("Use name")
-                                    .font(.system(size: 8)).foregroundColor(themeVM.dim)
-                                Toggle("", isOn: Binding(
-                                    get: { authVM.useAccountName(provider: acc.provider) },
-                                    set: { authVM.setUseAccountName($0, provider: acc.provider) }
-                                ))
-                                .labelsHidden()
-                                .tint(themeVM.accent)
-                                .scaleEffect(0.7)
-                            }
-
-                            // Red glowing disconnect button
-                            Button {
-                                authVM.disconnectAccount(acc.provider)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.red)
-                                    .shadow(color: .red.opacity(0.6), radius: 4, x: 0, y: 0)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Section("ADD ACCOUNT") {
-                // Add GitHub if not connected
-                if !authVM.githubConnected {
-                    Button {
-                        Task { await authVM.startGitHubDeviceFlow() }
-                    } label: {
-                        Label("Connect GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
-                            .foregroundColor(themeVM.accent)
-                    }
-                }
-                // Add Apple if not connected
-                if authVM.appleUserId.isEmpty {
-                    // Use UIViewRepresentable to avoid "not in hierarchy" crash from sidebar
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Connect Apple ID", systemImage: "apple.logo")
-                            .font(.system(size: 11))
-                            .foregroundColor(themeVM.accent)
-                        AppleSignInButton(
-                            onRequest: { req in authVM.prepareAppleRequest(req) },
-                            onCompletion: { result in authVM.handleAppleCompletion(result) }
-                        )
-                        .frame(height: 44)
-                        .cornerRadius(8)
-                    }
-                }
-            }
-
-            Section {
-                Button(role: .destructive) { authVM.signOut() } label: {
-                    Label("Sign Out All", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-}
-
-struct IDEDrawerAboutTab: View {
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-
-    var body: some View {
-        List {
-            Section {
-                Link(destination: URL(string: "https://radicaldeepscale.com")!) {
-                    Label("Radical Deepscale", systemImage: "globe")
-                        .foregroundColor(themeVM.accent)
-                }
-                Link(destination: URL(string: "https://dartmeadow.com")!) {
-                    Label("DART Meadow", systemImage: "globe")
-                        .foregroundColor(themeVM.accent)
-                }
-                Link(destination: URL(string: "https://github.com/DART-Skyboard/AshtreeIDE-iOS")!) {
-                    Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
-                        .foregroundColor(themeVM.accent)
-                }
-                Link(destination: URL(string: "https://radicaldeepscale.com/ashtreeide.html")!) {
-                    Label("Ash Tree IDE Web", systemImage: "safari")
-                        .foregroundColor(themeVM.accent)
-                }
-                Link(destination: URL(string: "https://leatr.xyz")!) {
-                    Label("LEATR", systemImage: "book")
-                        .foregroundColor(themeVM.accent)
-                }
-            } header: {
-                Text("LINKS").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
-            }
-
-            Section {
-                LabeledContent("App", value: "Ash Tree IDE").foregroundColor(themeVM.text)
-                LabeledContent("Version",
-                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4.0")
-                    .foregroundColor(themeVM.text)
-                LabeledContent("Compiler", value: "LEATR v2").foregroundColor(themeVM.text)
-                LabeledContent("Author", value: "Justin Craig Venable").foregroundColor(themeVM.text)
-                LabeledContent("Company", value: "DART Meadow | Radical Deepscale LLC.").foregroundColor(themeVM.text)
-            } header: {
-                Text("ABOUT").font(.system(size: 9, design: .monospaced)).foregroundColor(themeVM.dim).kerning(1)
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
     }
 }
