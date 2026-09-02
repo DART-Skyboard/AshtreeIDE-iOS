@@ -13,6 +13,7 @@ public enum IDETab: String, CaseIterable {
         case .terminal: return "terminal"
         case .files:    return "folder"
         case .maze:     return "puzzlepiece"
+        case .mindmap:  return "brain.head.profile"
         case .docs:     return "book"
         case .help:     return "questionmark.circle"
         }
