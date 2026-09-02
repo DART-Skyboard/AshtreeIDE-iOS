@@ -381,9 +381,8 @@ struct MashCanvasView: View {
             MashNewDocSheet(isPresented: $showNewDoc)
                 .environmentObject(themeVM)
         }
-        .onChange(of: vm.selectedId) { id in
-            if id != nil { showNodeEditor = true }
-        }
+        // Node editor opens via context menu now, not on every select
+        // .onChange removed — use long-press context menu instead
     }
 
     // Build & Run: generate ASH from mind map and run it
@@ -410,16 +409,33 @@ struct MashCanvasView: View {
 
 // MARK: - Canvas VM
 
-enum MashTool { case select, connect, pan }
+enum MashTool { case select, connect, pan, marquee }
 
 @MainActor
 class MashCanvasVM: ObservableObject {
-    @Published var scale:           CGFloat = 1.0
-    @Published var offset:          CGSize  = .zero
-    @Published var selectedId:      String? = nil
-    @Published var tool:            MashTool = .select
-    @Published var connectionFirst: String? = nil
+    @Published var scale:            CGFloat = 1.0
+    @Published var offset:           CGSize  = .zero
+    @Published var selectedId:       String? = nil
+    @Published var selectedIds:      Set<String> = []
+    @Published var tool:             MashTool = .select
+    @Published var connectionFirst:  String? = nil
+    // Node drag
+    @Published var isDraggingNode:   Bool = false
+    @Published var draggingId:       String? = nil
+    // Marquee selection
+    @Published var marqueeStart:     CGPoint? = nil
+    @Published var marqueeEnd:       CGPoint? = nil
+    @Published var isMarqueeActive:  Bool = false
+    // Context menu
+    @Published var contextNodeId:    String? = nil
+    @Published var showContextMenu:  Bool = false
+    // Tangent editing
+    @Published var editingConnId:    String? = nil
+    @Published var tangent1:         CGPoint = .zero
+    @Published var tangent2:         CGPoint = .zero
 
+    @Published var lastPanDelta: CGSize? = nil
+    var baseScale: CGFloat = 1.0
     private let store = MashStore.shared
 
     func addChildToSelected(doc: MashDocument) {
@@ -584,7 +600,6 @@ struct MashCanvas: View {
     let doc:  MashDocument
     @ObservedObject var vm: MashCanvasVM
     @EnvironmentObject var themeVM: IDEThemeViewModel
-    @GestureState private var dragState: CGSize = .zero
 
     var theme: MashTheme {
         doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
@@ -592,165 +607,321 @@ struct MashCanvas: View {
 
     var body: some View {
         GeometryReader { geo in
+            let cx = geo.size.width  / 2  // canvas centre x
+            let cy = geo.size.height / 2  // canvas centre y
+
             ZStack {
-                // Canvas background
+                // ── Background fills full geo ──────────────────
                 if theme.canvasTransparent {
                     Color.clear
                 } else {
                     Color(hex: theme.canvasBackground)
                 }
 
-                // Grid dots
+                // ── Dot grid (fixed to canvas, not world-space) ─
                 if !theme.canvasTransparent {
                     Canvas { ctx, size in
-                        let spacing: CGFloat = 40 * vm.scale
-                        let ox = vm.offset.width.truncatingRemainder(dividingBy: spacing)
-                        let oy = vm.offset.height.truncatingRemainder(dividingBy: spacing)
+                        let sp = 40 * vm.scale
+                        let ox = (vm.offset.width  + cx).truncatingRemainder(dividingBy: sp)
+                        let oy = (vm.offset.height + cy).truncatingRemainder(dividingBy: sp)
                         var x = ox; while x < size.width {
                             var y = oy; while y < size.height {
-                                ctx.fill(Path(ellipseIn: CGRect(x:x-0.8,y:y-0.8,width:1.6,height:1.6)),
-                                         with:.color(Color(hex:theme.connectionColor).opacity(0.12)))
-                                y += spacing
+                                ctx.fill(
+                                    Path(ellipseIn:CGRect(x:x-0.8,y:y-0.8,width:1.6,height:1.6)),
+                                    with:.color(Color(hex:theme.connectionColor).opacity(0.12)))
+                                y += sp
                             }
-                            x += spacing
+                            x += sp
                         }
                     }
                 }
 
-                // Transformed content
+                // ── World content (clipped to canvas) ──────────
                 ZStack {
-                    // Connections (tree edges)
+                    // Connections layer (Canvas API, no hit-testing needed)
                     Canvas { ctx, size in
                         let allNodes = doc.nodes
-                        for (parentId, node) in allNodes {
+                        // Tree edges
+                        for (_, node) in allNodes {
                             for childId in node.children {
                                 guard let child = allNodes[childId] else { continue }
-                                drawConnection(ctx: ctx, size: size,
-                                    from: CGPoint(x: node.x, y: node.y),
-                                    to:   CGPoint(x: child.x, y: child.y),
-                                    style: theme.connectionStyle,
-                                    color: Color(hex: theme.connectionColor),
-                                    dashed: false, arrowType: .none,
-                                    offset: CGPoint(x: size.width/2, y: size.height/2))
+                                drawConnection(ctx:ctx,
+                                    from: worldToScreen(CGPoint(x:node.x, y:node.y), cx:cx,cy:cy),
+                                    to:   worldToScreen(CGPoint(x:child.x, y:child.y), cx:cx,cy:cy),
+                                    style:theme.connectionStyle,
+                                    color:Color(hex:theme.connectionColor),
+                                    dashed:false, arrowType:.none)
                             }
                         }
-                        // Reference connections (cross-links)
+                        // Cross-links
                         for conn in doc.connections {
-                            guard let fromNode = allNodes[conn.fromId],
-                                  let toNode   = allNodes[conn.toId] else { continue }
-                            let color = conn.color.map { Color(hex: $0) } ?? Color(hex: theme.connectionColor)
-                            drawConnection(ctx: ctx, size: size,
-                                from: CGPoint(x: fromNode.x, y: fromNode.y),
-                                to:   CGPoint(x: toNode.x,   y: toNode.y),
-                                style: theme.connectionStyle,
-                                color: color.opacity(0.7),
-                                dashed: conn.dashed, arrowType: conn.arrowType,
-                                offset: CGPoint(x: size.width/2, y: size.height/2))
+                            guard let fn = allNodes[conn.fromId],
+                                  let tn = allNodes[conn.toId] else { continue }
+                            let col = conn.color.map{Color(hex:$0)} ?? Color(hex:theme.connectionColor)
+                            drawConnection(ctx:ctx,
+                                from:worldToScreen(CGPoint(x:fn.x, y:fn.y), cx:cx,cy:cy),
+                                to:  worldToScreen(CGPoint(x:tn.x, y:tn.y), cx:cx,cy:cy),
+                                style:theme.connectionStyle,
+                                color:col.opacity(0.7),
+                                dashed:conn.dashed, arrowType:conn.arrowType)
+                        }
+                        // Marquee box
+                        if let ms = vm.marqueeStart, let me = vm.marqueeEnd {
+                            let rect = CGRect(
+                                x:min(ms.x,me.x), y:min(ms.y,me.y),
+                                width:abs(me.x-ms.x), height:abs(me.y-ms.y))
+                            var p = Path(rect); ctx.stroke(p,
+                                with:.color(Color(hex:theme.connectionColor).opacity(0.8)),
+                                style:StrokeStyle(lineWidth:1.5,dash:[6,4]))
+                            ctx.fill(Path(rect),
+                                with:.color(Color(hex:theme.connectionColor).opacity(0.08)))
                         }
                     }
 
-                    // Nodes
-                    ForEach(Array(doc.nodes.values), id: \.id) { nodeData in
-                        MashNodeView(nodeData: nodeData, theme: theme,
-                                     isSelected: vm.selectedId == nodeData.id,
-                                     isConnectFirst: vm.connectionFirst == nodeData.id)
-                            .position(x: nodeData.x, y: nodeData.y)
-                            .gesture(
-                                DragGesture(minimumDistance: 3)
-                                    .onChanged { val in
-                                        vm.moveNode(nodeData.id, by: val.translation, doc: doc)
+                    // Nodes layer — each positioned in screen space
+                    ForEach(Array(doc.nodes.values), id:\.id) { nodeData in
+                        let screenPos = worldToScreen(CGPoint(x:nodeData.x, y:nodeData.y), cx:cx, cy:cy)
+                        MashNodeView(
+                            nodeData: nodeData, theme: theme,
+                            isSelected: vm.selectedId == nodeData.id || vm.selectedIds.contains(nodeData.id),
+                            isConnectFirst: vm.connectionFirst == nodeData.id)
+                        .scaleEffect(vm.scale)
+                        .position(screenPos)
+                        // Node drag gesture — highest priority
+                        .gesture(
+                            DragGesture(minimumDistance:4, coordinateSpace:.local)
+                                .onChanged { val in
+                                    if vm.tool == .select {
+                                        vm.isDraggingNode = true
+                                        vm.draggingId = nodeData.id
+                                        // Move in world space
+                                        let dx = val.translation.width  / vm.scale
+                                        let dy = val.translation.height / vm.scale
+                                        var d = doc
+                                        d.nodes[nodeData.id]?.x = nodeData.x + dx
+                                        d.nodes[nodeData.id]?.y = nodeData.y + dy
+                                        MashStore.shared.updateDocument(d)
                                     }
-                            )
-                            .onTapGesture {
-                                vm.handleNodeTap(nodeData.id, doc: doc)
-                            }
+                                }
+                                .onEnded { _ in
+                                    vm.isDraggingNode = false
+                                    vm.draggingId = nil
+                                }
+                        )
+                        // Tap: select / connect
+                        .onTapGesture {
+                            vm.handleNodeTap(nodeData.id, doc:doc)
+                        }
+                        // Long press: context menu
+                        .onLongPressGesture(minimumDuration: 0.4) {
+                            vm.selectedId = nodeData.id
+                            vm.contextNodeId = nodeData.id
+                            vm.showContextMenu = true
+                        }
                     }
                 }
-                .scaleEffect(vm.scale)
-                .offset(vm.offset)
+                // ✅ CLIP everything to the canvas bounds
+                .clipped()
+                // Canvas pan: only fires when NOT dragging a node
                 .gesture(
-                    // Pan canvas
-                    DragGesture(minimumDistance: 5)
+                    DragGesture(minimumDistance:8, coordinateSpace:.local)
                         .onChanged { val in
-                            if vm.tool == .pan || vm.selectedId == nil {
+                            guard !vm.isDraggingNode else { return }
+                            if vm.tool == .marquee {
+                                // Marquee selection
+                                if vm.marqueeStart == nil {
+                                    vm.marqueeStart = val.startLocation
+                                    vm.isMarqueeActive = true
+                                }
+                                vm.marqueeEnd = val.location
+                            } else {
+                                // Pan
                                 vm.offset = CGSize(
-                                    width:  vm.offset.width  + val.translation.width  - dragState.width,
-                                    height: vm.offset.height + val.translation.height - dragState.height)
+                                    width:  vm.offset.width  + val.translation.width  - (vm.lastPanDelta?.width  ?? 0),
+                                    height: vm.offset.height + val.translation.height - (vm.lastPanDelta?.height ?? 0))
+                                vm.lastPanDelta = val.translation
                             }
+                        }
+                        .onEnded { val in
+                            vm.lastPanDelta = nil
+                            if vm.isMarqueeActive, let ms = vm.marqueeStart, let me = vm.marqueeEnd {
+                                // Select all nodes within marquee rect (screen space)
+                                let rect = CGRect(x:min(ms.x,me.x),y:min(ms.y,me.y),
+                                                  width:abs(me.x-ms.x),height:abs(me.y-ms.y))
+                                var hits = Set<String>()
+                                for (_, n) in doc.nodes {
+                                    let sp = worldToScreen(CGPoint(x:n.x,y:n.y),cx:cx,cy:cy)
+                                    if rect.contains(sp) { hits.insert(n.id) }
+                                }
+                                vm.selectedIds = hits
+                                if hits.count == 1 { vm.selectedId = hits.first }
+                            }
+                            vm.marqueeStart = nil; vm.marqueeEnd = nil
+                            vm.isMarqueeActive = false
                         }
                 )
                 // Pinch to zoom
                 .gesture(
                     MagnificationGesture()
                         .onChanged { val in
-                            vm.scale = max(0.2, min(4.0, val))
+                            vm.scale = max(0.25, min(4.0, val * vm.baseScale))
+                        }
+                        .onEnded { val in
+                            vm.baseScale = vm.scale
                         }
                 )
+                // Tap on empty canvas: deselect
+                .onTapGesture {
+                    if !vm.isDraggingNode {
+                        vm.selectedId = nil
+                        vm.selectedIds = []
+                        vm.showContextMenu = false
+                    }
+                }
+
+                // ── Context menu overlay ─────────────────────────
+                if vm.showContextMenu, let nodeId = vm.contextNodeId,
+                   let node = doc.nodes[nodeId] {
+                    let screenPos = worldToScreen(CGPoint(x:node.x, y:node.y), cx:cx, cy:cy)
+                    MashContextMenu(
+                        nodeId: nodeId, doc: doc, vm: vm,
+                        position: CGPoint(
+                            x: min(max(screenPos.x, 120), geo.size.width  - 120),
+                            y: min(max(screenPos.y - 100, 50), geo.size.height - 200)))
+                        .environmentObject(themeVM)
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
-    // Draw a bezier or straight connection between two canvas points
-    private func drawConnection(ctx: GraphicsContext, size: CGSize,
+    // World → screen coordinate transform
+    func worldToScreen(_ world: CGPoint, cx: CGFloat, cy: CGFloat) -> CGPoint {
+        CGPoint(
+            x: cx + (world.x + vm.offset.width  / vm.scale) * vm.scale,
+            y: cy + (world.y + vm.offset.height / vm.scale) * vm.scale)
+    }
+
+    // Draw a connection between two SCREEN-SPACE points
+    private func drawConnection(ctx: GraphicsContext,
                                  from: CGPoint, to: CGPoint,
-                                 style: MashConnectionStyle, color: Color,
-                                 dashed: Bool, arrowType: MashArrowType,
-                                 offset: CGPoint) {
-        let fx = from.x + offset.x
-        let fy = from.y + offset.y
-        let tx = to.x   + offset.x
-        let ty = to.y   + offset.y
+                                 style: MashConnectionStyle,
+                                 color: Color,
+                                 dashed: Bool, arrowType: MashArrowType) {
         var path = Path()
         switch style {
         case .curved, .organic:
-            let cx1 = fx + (tx - fx) * 0.5
-            let cy1 = fy
-            let cx2 = fx + (tx - fx) * 0.5
-            let cy2 = ty
-            path.move(to: CGPoint(x: fx, y: fy))
-            path.addCurve(to: CGPoint(x: tx, y: ty),
-                          control1: CGPoint(x: cx1, y: cy1),
-                          control2: CGPoint(x: cx2, y: cy2))
+            let dx = (to.x - from.x)
+            let cp1 = CGPoint(x: from.x + dx * 0.5, y: from.y)
+            let cp2 = CGPoint(x: to.x   - dx * 0.5, y: to.y)
+            path.move(to: from)
+            path.addCurve(to: to, control1: cp1, control2: cp2)
         case .straight:
-            // 90° flowchart routing
-            let mx = fx + (tx - fx) * 0.5
-            path.move(to: CGPoint(x: fx, y: fy))
-            path.addLine(to: CGPoint(x: mx, y: fy))
-            path.addLine(to: CGPoint(x: mx, y: ty))
-            path.addLine(to: CGPoint(x: tx, y: ty))
+            let mx = from.x + (to.x - from.x) * 0.5
+            path.move(to: from)
+            path.addLine(to: CGPoint(x: mx, y: from.y))
+            path.addLine(to: CGPoint(x: mx, y: to.y))
+            path.addLine(to: to)
         }
-
-        var stroke = ctx.resolve(GraphicsContext.Shading.color(color))
-        let style2 = StrokeStyle(lineWidth: dashed ? 1.5 : 2,
-                                 lineCap: .round, lineJoin: .round,
-                                 dash: dashed ? [6,4] : [])
-        ctx.stroke(path, with: stroke, style: style2)
-
-        // Arrow
+        let stroke = StrokeStyle(lineWidth:dashed ? 1.5 : 2,
+                                  lineCap:.round, lineJoin:.round,
+                                  dash: dashed ? [6,4] : [])
+        ctx.stroke(path, with:.color(color), style:stroke)
+        // Arrow tips
         if arrowType != .none {
-            let angle = atan2(ty - fy, tx - fx)
-            let arrowSize: CGFloat = 8
-            func arrowAt(_ px: CGFloat, _ py: CGFloat, _ a: Double) {
+            let ang = atan2(to.y - from.y, to.x - from.x)
+            let asz: CGFloat = 9
+            func tip(_ p: CGPoint, _ a: Double) {
                 var arr = Path()
-                arr.move(to: CGPoint(x: px, y: py))
-                arr.addLine(to: CGPoint(
-                    x: px - CGFloat(cos(a - 0.4)) * arrowSize,
-                    y: py - CGFloat(sin(a - 0.4)) * arrowSize))
-                arr.move(to: CGPoint(x: px, y: py))
-                arr.addLine(to: CGPoint(
-                    x: px - CGFloat(cos(a + 0.4)) * arrowSize,
-                    y: py - CGFloat(sin(a + 0.4)) * arrowSize))
-                ctx.stroke(arr, with: stroke, lineWidth: 1.5)
+                arr.move(to:p)
+                arr.addLine(to:CGPoint(x:p.x-CGFloat(cos(a-0.4))*asz, y:p.y-CGFloat(sin(a-0.4))*asz))
+                arr.move(to:p)
+                arr.addLine(to:CGPoint(x:p.x-CGFloat(cos(a+0.4))*asz, y:p.y-CGFloat(sin(a+0.4))*asz))
+                ctx.stroke(arr, with:.color(color), lineWidth:1.5)
             }
-            if arrowType == .forward || arrowType == .both {
-                arrowAt(tx, ty, Double(angle))
-            }
-            if arrowType == .backward || arrowType == .both {
-                arrowAt(fx, fy, Double(angle) + .pi)
-            }
-            _ = stroke // suppress warning
+            if arrowType == .forward || arrowType == .both { tip(to, Double(ang)) }
+            if arrowType == .backward || arrowType == .both { tip(from, Double(ang) + .pi) }
         }
+    }
+}
+
+// ── Context menu popup ──────────────────────────────────
+
+struct MashContextMenu: View {
+    let nodeId: String
+    let doc:    MashDocument
+    @ObservedObject var vm: MashCanvasVM
+    let position: CGPoint
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+
+    var node: MashNodeData? { doc.nodes[nodeId] }
+
+    var body: some View {
+        VStack(spacing:0) {
+            menuItem("Edit Node",      icon:"pencil")         { vm.showContextMenu = false; vm.selectedId = nodeId }
+            Divider().background(Color(hex:"#21262d"))
+            menuItem("Add Child",      icon:"plus.circle")    { vm.addChildToSelected(doc:doc); vm.showContextMenu = false }
+            Divider().background(Color(hex:"#21262d"))
+            menuItem("Duplicate",      icon:"doc.on.doc")     { duplicateNode(); vm.showContextMenu = false }
+            Divider().background(Color(hex:"#21262d"))
+            menuItem("Copy Text",      icon:"doc.on.clipboard") {
+                if let n = node { UIPasteboard.general.string = n.text }
+                vm.showContextMenu = false
+            }
+            Divider().background(Color(hex:"#21262d"))
+            if let url = node?.url, !url.isEmpty {
+                menuItem("Open Link",  icon:"link") {
+                    if let u = URL(string:url) { UIApplication.shared.open(u) }
+                    vm.showContextMenu = false
+                }
+                Divider().background(Color(hex:"#21262d"))
+            }
+            menuItem("Delete",         icon:"trash", destructive:true) {
+                vm.deleteSelected(doc:doc); vm.showContextMenu = false
+            }
+        }
+        .frame(width:200)
+        .background(Color(hex:"#161b22"))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius:12).stroke(Color(hex:"#30363d"),lineWidth:0.5))
+        .shadow(color:.black.opacity(0.5), radius:16, y:8)
+        .position(position)
+    }
+
+    private func duplicateNode() {
+        guard let n = doc.nodes[nodeId] else { return }
+        var d = doc
+        let newId = UUID().uuidString
+        var newNode = n
+        // Need to modify the struct directly
+        var copy = d.nodes[nodeId]!
+        copy = MashNodeData(id:newId, type:copy.type, text:copy.text+"  (copy)",
+            detail:copy.detail, url:copy.url, imageData:copy.imageData,
+            x:copy.x+60, y:copy.y+60, width:copy.width,
+            children:[], parentId:copy.parentId,
+            collapsed:false, fillColor:copy.fillColor, borderColor:copy.borderColor,
+            textColor:copy.textColor, cornerStyle:copy.cornerStyle,
+            fontSize:copy.fontSize, bold:copy.bold, italic:copy.italic)
+        d.nodes[newId] = copy
+        if let parentId = copy.parentId { d.nodes[parentId]?.children.append(newId) }
+        MashStore.shared.updateDocument(d)
+        vm.selectedId = newId
+        _ = newNode
+    }
+
+    @ViewBuilder
+    private func menuItem(_ label:String, icon:String, destructive:Bool=false, action:@escaping()->Void) -> some View {
+        Button(action:action) {
+            HStack(spacing:10) {
+                Image(systemName:icon).font(.system(size:13))
+                    .foregroundColor(destructive ? .red : themeVM.dim).frame(width:20)
+                Text(label).font(.system(size:12,design:.monospaced))
+                    .foregroundColor(destructive ? .red : themeVM.text)
+                Spacer()
+            }
+            .padding(.horizontal,14).padding(.vertical,10)
+        }
+        .buttonStyle(.plain)
     }
 }
 
