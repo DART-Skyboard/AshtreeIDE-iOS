@@ -452,3 +452,226 @@ public final class MashStore: ObservableObject {
         save()
     }
 }
+
+// MARK: - ASH Code Generator from Mind Map
+
+public struct MashAshCodeGenerator {
+
+    // ── Parse ASH source into a mind map ──────────────────
+    public static func fromAshSource(_ source: String, title: String) -> MashDocument {
+        var doc = MashDocument.new(title: title)
+        doc.layout = .flowchart
+        doc.themeId = "dark-ash"
+
+        let lines = source.components(separatedBy: "\n")
+        var allNodes: [String: MashNodeData] = [:]
+        var rootNode = doc.nodes[doc.rootId]!
+        rootNode.text = title
+        allNodes[doc.rootId] = rootNode
+
+        var currentParentId = doc.rootId
+        var lastNodeId: String? = nil
+        var depth = 0
+        var y: CGFloat = 0
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("//") && !trimmed.contains("{{") { continue }
+
+            let nodeId = UUID().uuidString
+            var nodeType: MashNodeType = .note
+            var nodeText = trimmed
+            var parentId = currentParentId
+            var x: CGFloat = 0
+
+            // Determine node type from ASH syntax
+            if trimmed.hasPrefix("{{") && trimmed.hasSuffix("}}") {
+                nodeType = .category
+                nodeText = "ENV: " + (trimmed.dropFirst(2).dropLast(2))
+                parentId = doc.rootId
+                x = -200; y += 120
+            } else if trimmed.hasPrefix("[[") && trimmed.hasSuffix("]]") {
+                nodeType = .category
+                nodeText = "SCRIPT: " + (trimmed.dropFirst(2).dropLast(2))
+                parentId = doc.rootId
+                x = 200; y += 120
+            } else if trimmed.hasPrefix("[poly:") || trimmed.hasPrefix("[net:") {
+                nodeType = .subtitle
+                nodeText = trimmed.hasPrefix("[poly:") ? "POLY: " + trimmed.dropFirst(6).dropLast(1) : "NET: " + trimmed.dropFirst(5).dropLast(1)
+                parentId = currentParentId
+                x = 300; y += 80
+            } else if trimmed.hasPrefix("import ") {
+                nodeType = .link
+                nodeText = "import: " + trimmed.dropFirst(7)
+                parentId = doc.rootId
+                x = 0; y += 80
+            } else if trimmed.contains(":-:") {
+                // Node block declaration — main node
+                nodeType = .main
+                nodeText = trimmed.components(separatedBy: ":-:").first?
+                    .trimmingCharacters(in: .whitespaces)
+                    .replacingOccurrences(of: "(", with: "")
+                    .replacingOccurrences(of: ")", with: "") ?? trimmed
+                currentParentId = nodeId
+                depth += 1
+                x = CGFloat(depth) * 220 - 440
+                y += 160
+            } else if trimmed.hasPrefix("irin ") {
+                nodeType = .note
+                nodeText = "irin: " + trimmed.dropFirst(5)
+                x = CGFloat(depth) * 220 - 300; y += 70
+            } else if trimmed.hasPrefix("irout ") {
+                nodeType = .note
+                nodeText = "irout: " + trimmed.dropFirst(6)
+                x = CGFloat(depth) * 220 - 300; y += 70
+            } else if trimmed.hasPrefix("thenplace") || trimmed.hasPrefix("place") {
+                nodeType = .note
+                x = CGFloat(depth) * 220 - 300; y += 60
+            } else if trimmed == "}|';'|" || trimmed.hasPrefix("}::::") {
+                // Close node block — go back up
+                depth = max(0, depth - 1)
+                currentParentId = allNodes[currentParentId]?.parentId ?? doc.rootId
+                continue
+            } else if trimmed.hasPrefix("with") || trimmed.hasPrefix("var ") || trimmed.hasPrefix("Var ") {
+                nodeType = .note
+                x = CGFloat(depth) * 220 - 350; y += 50
+            } else {
+                // Natural tools or other keywords
+                let natTools: Set<String> = ["Maze","Puzzle","Envelope","Hammer","Stick","Knife","Scissors","Touch","Taste","Vision","Smell","Hear"]
+                if natTools.contains(trimmed) {
+                    nodeType = .subtitle
+                    nodeText = "Tool: " + trimmed
+                    x = CGFloat(depth) * 220 - 280; y += 60
+                } else {
+                    continue // Skip other lines
+                }
+            }
+
+            let node = MashNodeData(id: nodeId, type: nodeType, text: nodeText,
+                detail: "", url: "", imageData: nil,
+                x: x, y: y, width: nodeType == .main ? 150 : 130,
+                children: [], parentId: parentId, collapsed: false,
+                fillColor: nil, borderColor: nil, textColor: nil,
+                cornerStyle: nil, fontSize: nil,
+                bold: nodeType == .main || nodeType == .root,
+                italic: false)
+            allNodes[nodeId] = node
+            allNodes[parentId]?.children.append(nodeId)
+            lastNodeId = nodeId
+        }
+
+        doc.nodes = allNodes
+        return doc
+    }
+
+    // ── Generate ASH source from mind map nodes ────────────
+    public static func toAshSource(_ doc: MashDocument) -> String {
+        var lines: [String] = []
+        lines.append("// ════════════════════════════════════════════")
+        lines.append("// \(doc.title) — generated from MASH mind map")
+        lines.append("// Ash Tree IDE · LEATR v2 · © 2025 DART Meadow | Radical Deepscale LLC.")
+        lines.append("// ════════════════════════════════════════════")
+        lines.append("")
+
+        func processNode(_ id: String, depth: Int) {
+            guard let node = doc.nodes[id] else { return }
+            let indent = String(repeating: "  ", count: depth)
+            let text   = node.text
+
+            switch node.type {
+            case .root:
+                lines.append("// Root: \(text)")
+                lines.append("")
+            case .category:
+                if text.hasPrefix("ENV:") {
+                    let env = text.dropFirst(4).trimmingCharacters(in:.whitespaces)
+                    lines.append("{{env:\(env)}}")
+                } else if text.hasPrefix("SCRIPT:") {
+                    let scr = text.dropFirst(7).trimmingCharacters(in:.whitespaces)
+                    lines.append("[[script:\(scr)]]")
+                } else {
+                    lines.append("// \(text)")
+                }
+                lines.append("")
+            case .subtitle:
+                if text.hasPrefix("POLY:") {
+                    let p = text.dropFirst(5).trimmingCharacters(in:.whitespaces)
+                    lines.append("\(indent)[poly: \(p)]")
+                } else if text.hasPrefix("NET:") {
+                    let n = text.dropFirst(4).trimmingCharacters(in:.whitespaces)
+                    lines.append("\(indent)[net: \(n)]")
+                } else if text.hasPrefix("Tool:") {
+                    let t = text.dropFirst(5).trimmingCharacters(in:.whitespaces)
+                    lines.append("\(indent)\(t)")
+                } else {
+                    lines.append("\(indent)// \(text)")
+                }
+            case .main:
+                // Node block
+                lines.append("")
+                let nodeName = text.filter { $0.isLetter || $0.isNumber }
+                    .prefix(1).uppercased() + text.filter { $0.isLetter || $0.isNumber }.dropFirst()
+                lines.append("(\(nodeName)):-: {")
+                lines.append("")
+                lines.append("  with")
+                lines.append("    var (s)  // Data Set")
+                lines.append("")
+                lines.append("  {")
+            case .note:
+                if text.hasPrefix("irin:") {
+                    let v = text.dropFirst(5).trimmingCharacters(in:.whitespaces)
+                    lines.append("\(indent)irin (\(v))")
+                } else if text.hasPrefix("irout:") {
+                    let v = text.dropFirst(6).trimmingCharacters(in:.whitespaces)
+                    lines.append("\(indent)irout (\(v))")
+                } else if text.hasPrefix("import:") {
+                    let v = text.dropFirst(7).trimmingCharacters(in:.whitespaces)
+                    lines.append("import (\(v))")
+                } else {
+                    lines.append("\(indent)// \(text)")
+                }
+                if !node.detail.isEmpty {
+                    lines.append("\(indent)// Note: \(node.detail)")
+                }
+            case .link:
+                if text.hasPrefix("import:") {
+                    let v = text.dropFirst(7).trimmingCharacters(in:.whitespaces)
+                    lines.append("import (\(v))")
+                }
+            case .image:
+                lines.append("\(indent)// [image node: \(text)]")
+            }
+
+            // Process children
+            for childId in node.children {
+                processNode(childId, depth: depth + 1)
+            }
+
+            // Close main node blocks
+            if node.type == .main {
+                lines.append("  }")
+                lines.append("")
+                lines.append("  irout (\"Result: \"placeto (s))")
+                lines.append("")
+                lines.append("}|';'|")
+            }
+        }
+
+        // Top-level: categories first (env/script tags), then root tree
+        let topNodes = doc.nodes[doc.rootId]?.children ?? []
+        let categories = topNodes.filter { doc.nodes[$0]?.type == .category }
+        let others     = topNodes.filter { doc.nodes[$0]?.type != .category }
+
+        for id in categories { processNode(id, depth: 0) }
+        lines.append("")
+        processNode(doc.rootId, depth: 0)
+        for id in others { processNode(id, depth: 0) }
+
+        return lines.joined(separator: "\n")
+    }
+
+    // ── Load a default example into a mind map ─────────────
+    public static func fromExample(name: String, code: String) -> MashDocument {
+        return fromAshSource(code, title: name)
+    }
+}
