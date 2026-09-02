@@ -305,13 +305,14 @@ public struct MashDocument: Codable {
 
     public static func new(title: String) -> MashDocument {
         let rootId = UUID().uuidString
-        let now = Date().timeIntervalSince1970
-        let root = MashNodeData(id: rootId, type: .root, text: title,
-                                detail: "", url: "", imageData: nil,
-                                x: 0, y: 0, width: 160,
-                                children: [], parentId: nil, collapsed: false,
-                                fillColor: nil, borderColor: nil, textColor: nil,
-                                cornerStyle: nil, fontSize: nil, bold: true, italic: false)
+        let now    = Date().timeIntervalSince1970
+        let root   = MashNodeData(id: rootId, type: .root, text: title,
+                                  detail: "", url: "", imageData: nil,
+                                  x: 0, y: 0, width: 180,
+                                  children: [], parentId: nil, collapsed: false,
+                                  fillColor: nil, borderColor: nil, textColor: nil,
+                                  cornerStyle: nil, fontSize: nil, bold: true, italic: false)
+        // Single centered root — user builds from here
         return MashDocument(id: UUID().uuidString, title: title,
                             created: now, modified: now,
                             themeId: "dark-ash", customTheme: nil,
@@ -414,24 +415,7 @@ public final class MashStore: ObservableObject {
     public func newDocument(title: String, layout: MashLayout = .radial) -> MashDocument {
         var doc = MashDocument.new(title: title)
         doc.layout = layout
-        // Add 4 starter branches for radial/tree
-        if layout == .radial || layout == .tree {
-            let angles: [Double] = [45, 135, 225, 315]
-            let labels = ["Topic 1", "Topic 2", "Topic 3", "Topic 4"]
-            for (i, angle) in angles.enumerated() {
-                let rad = angle * .pi / 180
-                let dist: CGFloat = 200
-                let nodeId = UUID().uuidString
-                let node = MashNodeData(id: nodeId, type: .main,
-                    text: labels[i], detail: "", url: "", imageData: nil,
-                    x: CGFloat(cos(rad)) * dist, y: CGFloat(sin(rad)) * dist,
-                    width: 130, children: [], parentId: doc.rootId,
-                    collapsed: false, fillColor: nil, borderColor: nil,
-                    textColor: nil, cornerStyle: nil, fontSize: nil, bold: false, italic: false)
-                doc.nodes[nodeId] = node
-                doc.nodes[doc.rootId]?.children.append(nodeId)
-            }
-        }
+        // Start with single root — user adds nodes with + button
         documents.append(doc)
         activeDocId = doc.id
         save()
