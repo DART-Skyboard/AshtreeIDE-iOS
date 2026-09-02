@@ -177,6 +177,9 @@ struct IDETabContent: View {
                 case .terminal: IDETerminalView()
                 case .files:    IDEFilesView()
                 case .maze:     IDEMazeView()
+                case .mindmap:
+                    IDEMindMapView()
+                        .environmentObject(themeVM)
                 case .docs:     IDEDocsView()
                 case .help:     IDEHelpView().environmentObject(themeVM)
                 }
