@@ -63,7 +63,8 @@ class MashCanvasVM: ObservableObject {
         guard let parent = doc.nodes[parentId] else { return }
         var d = doc
         let count = parent.children.count
-        let angle = Double(count) * (2 * .pi / max(1, count + 1))
+        let divisor = Double(max(1, count + 1))
+        let angle = Double(count) * (2.0 * Double.pi / divisor)
         let dist: CGFloat = 200
         let newId = UUID().uuidString
         let node = MashNodeData(id:newId,
@@ -708,7 +709,7 @@ struct MashCanvas: View {
                 .clipped()
                 .gesture(canvasPan(sz:sz))
                 .gesture(MagnificationGesture()
-                    .onChanged{v in vm.scale=(vm.baseScale*v).clamped(lo:vm.minScale,hi:vm.maxScale)}
+                    .onChanged{v in vm.scale=Swift.min(Swift.max(vm.baseScale*v, vm.minScale), vm.maxScale)}
                     .onEnded{_ in vm.baseScale=vm.scale})
                 .onTapGesture{guard !vm.isDraggingNode else{return}
                     vm.selectedId=nil;vm.selectedIds=[];vm.showContextMenu=false}
@@ -718,8 +719,8 @@ struct MashCanvas: View {
                     MashContextMenu(nodeId:nid,doc:doc,vm:vm)
                         .environmentObject(themeVM)
                         .position(CGPoint(
-                            x:sp.x.clamped(lo:110,hi:sz.width-110),
-                            y:(sp.y-110).clamped(lo:50,hi:sz.height-240)))
+                            x:Swift.min(Swift.max(sp.x, 110), sz.width-110),
+                            y:Swift.min(Swift.max(sp.y-110, 50), sz.height-240)))
                 }
             }
             .frame(width:sz.width,height:sz.height)
@@ -802,7 +803,7 @@ struct MashCanvas: View {
 }
 
 // Clamp helper
-extension CGFloat { func clamped(lo:CGFloat,hi:CGFloat)->CGFloat{min(max(self,lo),hi)} }
+extension CGFloat { func clamped(lo:CGFloat,hi:CGFloat)->CGFloat { Swift.min(Swift.max(self,lo),hi) } }
 
 // MARK: - Context Menu
 struct MashContextMenu: View {
