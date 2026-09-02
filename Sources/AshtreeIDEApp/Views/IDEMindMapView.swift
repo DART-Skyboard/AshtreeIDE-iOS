@@ -1153,7 +1153,7 @@ struct MashExportSheet: View {
     private func exportMASH() {
         do {
             let data = try JSONEncoder().encode(doc)
-            let name = doc.title.replacingOccurrences(of:" ","with":"-").lowercased() + ".mash"
+            let name = doc.title.replacingOccurrences(of:" ",with:"-").lowercased() + ".mash"
             let url  = FileManager.default.temporaryDirectory.appendingPathComponent(name)
             try data.write(to: url)
             exportURL = url; showShareSheet = true
