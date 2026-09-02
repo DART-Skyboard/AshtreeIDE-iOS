@@ -1682,3 +1682,6 @@ struct MashLoadFromEditorSheet: View {
 }
 
 // ShareSheet is defined in IDEMainView.swift
+}
+}
+
