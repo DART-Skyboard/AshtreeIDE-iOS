@@ -482,6 +482,7 @@ class MashCanvasVM: ObservableObject {
         switch tool {
         case .select:
             selectedId = (selectedId == id) ? nil : id
+            selectedIds = selectedId != nil ? [selectedId!] : []
         case .connect:
             if connectionFirst == nil {
                 connectionFirst = id
@@ -493,7 +494,8 @@ class MashCanvasVM: ObservableObject {
                 connectionFirst = nil
                 tool = .select
             }
-        case .pan: break
+        case .pan:    break
+        case .marquee: break
         }
     }
 
