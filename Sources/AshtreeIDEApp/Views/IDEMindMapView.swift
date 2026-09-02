@@ -255,7 +255,11 @@ struct MashCanvasView: View {
     @State private var showThemePicker = false
     @State private var showExport     = false
     @State private var showDocList    = false
-    @State private var showNewDoc     = false
+    @State private var showNewDoc         = false
+    @State private var showLoadFromEditor = false
+    @State private var showRunOutput      = false
+    @State private var mashRunOutput      = ""
+    @EnvironmentObject var ideVM: IDEState
 
     var body: some View {
         ZStack(alignment:.top) {
@@ -291,6 +295,8 @@ struct MashCanvasView: View {
                     toolButton("paintpalette", tip:"Theme")      { showThemePicker = true }
                     toolButton("square.and.arrow.up", tip:"Export") { showExport = true }
                     toolButton("plus.square.on.square", tip:"New") { showNewDoc = true }
+                    toolButton("square.and.arrow.down.on.square", tip:"Load from Editor") { showLoadFromEditor = true }
+                    toolButton("play.fill", tip:"Build & Run") { buildAndRunMash() }
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
                 .background(.ultraThinMaterial)
@@ -362,6 +368,11 @@ struct MashCanvasView: View {
             MashExportSheet(doc: doc, isPresented: $showExport)
                 .environmentObject(themeVM)
         }
+        .sheet(isPresented: $showLoadFromEditor) {
+            MashLoadFromEditorSheet(isPresented: $showLoadFromEditor)
+                .environmentObject(themeVM)
+                .environmentObject(ideVM)
+        }
         .sheet(isPresented: $showDocList) {
             MashDocListSheet(isPresented: $showDocList)
                 .environmentObject(themeVM)
@@ -373,6 +384,15 @@ struct MashCanvasView: View {
         .onChange(of: vm.selectedId) { id in
             if id != nil { showNodeEditor = true }
         }
+    }
+
+    // Build & Run: generate ASH from mind map and run it
+    private func buildAndRunMash() {
+        let code = MashAshCodeGenerator.toAshSource(doc)
+        ideVM.sourceCode  = code
+        ideVM.currentFile = doc.title.replacingOccurrences(of: " ", with: "_") + ".ash"
+        IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
+        Task { await ideVM.buildAndRun() }
     }
 
     @ViewBuilder
@@ -1320,6 +1340,99 @@ struct MashExportSheet: View {
         let url  = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try? content.write(to:url, atomically:true, encoding:.utf8)
         exportURL = url; showShareSheet = true; exportMsg = msg
+    }
+}
+
+// ── Load from Editor Sheet ──────────────────────────────────
+struct MashLoadFromEditorSheet: View {
+    @Binding var isPresented: Bool
+    @EnvironmentObject var themeVM:  IDEThemeViewModel
+    @EnvironmentObject var ideVM:    IDEState
+    @StateObject private var store   = MashStore.shared
+    @State private var selectedExample: String? = nil
+
+    // All IDE examples that can be loaded
+    struct ExampleEntry: Identifiable {
+        let id = UUID()
+        let name: String
+        let code: String
+        let icon: String
+    }
+
+    var examples: [ExampleEntry] {
+        IDEDefaults.examples.map { ex in
+            ExampleEntry(name: ex.name, code: ex.code,
+                         icon: ex.name.lowercased().contains("3d") || ex.name.lowercased().contains("gl") ? "cube" :
+                               ex.name.lowercased().contains("physics") ? "atom" :
+                               ex.name.lowercased().contains("network") ? "network" :
+                               ex.name.lowercased().contains("autumn") ? "brain" : "doc.text")
+        }
+    }
+
+    var editorEntry: ExampleEntry {
+        ExampleEntry(name: ideVM.currentFile.isEmpty ? "Editor Code" : ideVM.currentFile,
+                     code: ideVM.sourceCode,
+                     icon: "chevron.left.forwardslash.chevron.right")
+    }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(hex:"#0d1117").ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment:.leading, spacing:14) {
+                        // Current editor content
+                        if !ideVM.sourceCode.isEmpty {
+                            Text("CURRENT EDITOR").font(.system(size:8,weight:.bold,design:.monospaced))
+                                .foregroundColor(themeVM.dim).kerning(2)
+                            loadRow(entry: editorEntry)
+                        }
+
+                        Text("ASH EXAMPLES").font(.system(size:8,weight:.bold,design:.monospaced))
+                            .foregroundColor(themeVM.dim).kerning(2).padding(.top,4)
+
+                        ForEach(examples) { ex in
+                            loadRow(entry: ex)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Load into Mind Map")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement:.navigationBarLeading) {
+                    Button("Cancel") { isPresented = false }.foregroundColor(themeVM.dim)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func loadRow(entry: ExampleEntry) -> some View {
+        Button {
+            let doc = MashAshCodeGenerator.fromExample(name: entry.name, code: entry.code)
+            store.documents.append(doc)
+            store.activeDocId = doc.id
+            store.save()
+            isPresented = false
+        } label: {
+            HStack(spacing:12) {
+                Image(systemName:entry.icon).font(.system(size:16))
+                    .foregroundColor(themeVM.accent).frame(width:24)
+                VStack(alignment:.leading, spacing:2) {
+                    Text(entry.name).font(.system(size:11,weight:.semibold,design:.monospaced))
+                        .foregroundColor(themeVM.text)
+                    Text("Parse ASH → mind map nodes")
+                        .font(.system(size:9,design:.monospaced)).foregroundColor(themeVM.dim)
+                }
+                Spacer()
+                Image(systemName:"arrow.right.circle.fill").foregroundColor(themeVM.accent)
+            }
+            .padding(12).background(Color(hex:"#161b22")).cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius:8).stroke(Color(hex:"#21262d"),lineWidth:0.5))
+        }
+        .buttonStyle(.plain)
     }
 }
 
