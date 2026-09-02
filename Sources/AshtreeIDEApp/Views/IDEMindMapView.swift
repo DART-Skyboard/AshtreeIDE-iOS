@@ -458,28 +458,6 @@ struct MashSideToolbar: View {
     }
 }
 
-    // Build & Run: generate ASH from mind map and run it
-    private func buildAndRunMash() {
-        let code = MashAshCodeGenerator.toAshSource(doc)
-        ideVM.sourceCode  = code
-        ideVM.currentFile = doc.title.replacingOccurrences(of: " ", with: "_") + ".ash"
-        IDELanguageStore.shared.setEnvFromFilename(ideVM.currentFile)
-        Task { await ideVM.buildAndRun() }
-    }
-
-    @ViewBuilder
-    private func toolButton(_ icon: String, tip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size:14))
-                .foregroundColor(themeVM.dim)
-                .padding(7)
-                .background(Color(hex:"#161b22").opacity(0.9))
-                .cornerRadius(6)
-        }
-    }
-}
-
 // MARK: - Canvas VM
 
 enum MashTool { case select, connect, pan, marquee }
