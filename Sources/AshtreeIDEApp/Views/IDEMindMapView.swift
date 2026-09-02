@@ -194,41 +194,8 @@ struct IDEMindMapView: View {
                 MashCanvasView(doc: doc)
                     .environmentObject(themeVM)
             } else {
-struct MashWelcomeView: View {
-    @Binding var showNew:  Bool
-    @Binding var showList: Bool
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-
-    var body: some View {
-        ZStack {
-            Color(hex:"#0d1117").ignoresSafeArea()
-            VStack(spacing:20) {
-                Image(systemName:"brain.head.profile")
-                    .font(.system(size:52)).foregroundColor(themeVM.accent.opacity(0.6))
-                Text("MIND MAP").font(.system(size:11,weight:.bold,design:.monospaced))
-                    .foregroundColor(themeVM.dim).kerning(4)
-                Text("Create and edit .mash mind maps")
-                    .font(.system(size:11,design:.monospaced)).foregroundColor(themeVM.dim)
-
-                HStack(spacing:12) {
-                    Button { showNew = true } label: {
-                        Label("New Map", systemImage:"plus.circle.fill")
-                            .font(.system(size:11,weight:.semibold,design:.monospaced))
-                            .foregroundColor(.black).padding(.horizontal,18).padding(.vertical,10)
-                            .background(themeVM.accent).cornerRadius(10)
-                    }
-                    Button { showList = true } label: {
-                        Label("Open", systemImage:"folder")
-                            .font(.system(size:11,weight:.semibold,design:.monospaced))
-                            .foregroundColor(themeVM.accent).padding(.horizontal,18).padding(.vertical,10)
-                            .background(themeVM.accent.opacity(0.1)).cornerRadius(10)
-                            .overlay(RoundedRectangle(cornerRadius:10).stroke(themeVM.accent.opacity(0.3),lineWidth:0.5))
-                    }
-                }
-            }
-        }
-    }
-}
+                MashWelcomeView(showNew: $showNewDoc, showList: $showDocList)
+                    .environmentObject(themeVM)
 
             }
         }
