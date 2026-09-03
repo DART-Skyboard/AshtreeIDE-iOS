@@ -629,7 +629,7 @@ struct MashSideToolbar: View {
         // Add free node (no auto-link)
         ToolItem(icon:"plus.square")                 { vm.addFreeNode(doc:doc) },
         // Select
-        ToolItem(icon:"hand.tap.fill")               { vm.tool = .select },
+        ToolItem(icon:"cursorarrow")                  { vm.tool = .select },
         // Main solid link (reparents — solid tree edge)
         ToolItem(icon:"line.diagonal")               { vm.tool = vm.tool == .mainLink ? .select : .mainLink },
         // Bidirectional dashed reference link (↔)
@@ -714,7 +714,7 @@ struct MashSideToolbar: View {
 
     private func isActive(_ icon: String) -> Bool {
         switch icon {
-        case "hand.tap.fill":              return vm.tool == .select
+        case "cursorarrow":                return vm.tool == .select
         case "line.diagonal":              return vm.tool == .mainLink
         case "arrow.left.and.right":       return vm.tool == .connect
         case "arrow.right":                return vm.tool == .connectSingle
@@ -824,16 +824,7 @@ struct MashCanvas: View {
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
                 .simultaneousGesture(canvasPan(sz:sz))
-                .simultaneousGesture(MagnificationGesture()
-                    .onChanged { v in
-                        vm.scale = Swift.min(Swift.max(vm.baseScale * v, vm.minScale), vm.maxScale)
-                    }
-                    .onEnded { _ in vm.baseScale = vm.scale })
-                .onTapGesture {
-                    guard !vm.isDraggingNode else { return }
-                    vm.selectedId = nil; vm.selectedIds = []
-                    vm.showContextMenu = false; vm.selectedConnId = nil
-                }
+
                 // Connection context menu (tap near midpoint of a ref connection)
                 if vm.showConnMenu, let connId = vm.selectedConnId,
                    let conn = doc.connections.first(where:{$0.id==connId}),
@@ -874,39 +865,58 @@ struct MashCanvas: View {
     }
 
     // ── Node drag — start from world pos to avoid drift ──
-    private func nodeDrag(_ n:MashNodeData,sz:CGSize) -> some Gesture {
-        DragGesture(minimumDistance:6,coordinateSpace:.global)
-            .onChanged{val in
-                guard vm.tool == .select else{return}
+    private func nodeDrag(_ n:MashNodeData, sz:CGSize) -> some Gesture {
+        DragGesture(minimumDistance:5, coordinateSpace:.local)
+            .onChanged { val in
+                guard vm.tool == .select else { return }
                 if !vm.isDraggingNode {
-                    vm.isDraggingNode=true; vm.draggingId=n.id
-                    vm.dragStartWorld=CGPoint(x:n.x,y:n.y)
-                    vm.showContextMenu=false
+                    vm.isDraggingNode  = true
+                    vm.draggingId      = n.id
+                    vm.dragStartWorld  = CGPoint(x: n.x, y: n.y)
+                    vm.showContextMenu = false
+                    vm.showConnMenu    = false
                 }
-                var d=doc
+                var d = doc
                 d.nodes[n.id]?.x = vm.dragStartWorld.x + val.translation.width  / vm.scale
                 d.nodes[n.id]?.y = vm.dragStartWorld.y + val.translation.height / vm.scale
                 MashStore.shared.updateDocument(d)
             }
-            .onEnded{_ in vm.isDraggingNode=false;vm.draggingId=nil}
+            .onEnded { _ in
+                vm.isDraggingNode = false
+                vm.draggingId     = nil
+                // Snap back if using a strict template layout
+                let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
+                if strictLayouts.contains(doc.layout) {
+                    var d = doc
+                    vm.applyAutoLayout(doc: &d)
+                    MashStore.shared.updateDocument(d)
+                }
+            }
     }
 
     // ── Canvas pan / marquee ──────────────────────────────
     private func canvasPan(sz:CGSize) -> some Gesture {
-        DragGesture(minimumDistance:4,coordinateSpace:.local)
-            .onChanged{val in
-                guard !vm.isDraggingNode else{return}
-                if vm.tool == .marquee || vm.isMarqueeActive {
-                    if vm.marqueeStart==nil{vm.marqueeStart=val.startLocation;vm.isMarqueeActive=true}
-                    vm.marqueeEnd=val.location
+        DragGesture(minimumDistance:4, coordinateSpace:.local)
+            .onChanged { val in
+                guard !vm.isDraggingNode else { return }
+                if vm.tool == .marquee {
+                    // Marquee selection drag
+                    if vm.marqueeStart == nil {
+                        vm.marqueeStart    = val.startLocation
+                        vm.isMarqueeActive = true
+                    }
+                    vm.marqueeEnd = val.location
                 } else {
-                    let dx=val.translation.width  - vm.lastPanTranslation.x
-                    let dy=val.translation.height - vm.lastPanTranslation.y
-                    vm.offset=CGPoint(x:vm.offset.x+dx/vm.scale, y:vm.offset.y+dy/vm.scale)
-                    vm.lastPanTranslation=CGPoint(x:val.translation.width,y:val.translation.height)
+                    // Pan — accumulate delta since last frame only
+                    let dx = val.translation.width  - vm.lastPanTranslation.x
+                    let dy = val.translation.height - vm.lastPanTranslation.y
+                    vm.offset = CGPoint(x: vm.offset.x + dx/vm.scale,
+                                        y: vm.offset.y + dy/vm.scale)
+                    vm.lastPanTranslation = CGPoint(x:val.translation.width,
+                                                    y:val.translation.height)
                 }
             }
-            .onEnded{_ in
+            .onEnded { _ in
                 vm.lastPanTranslation = .zero
                 if vm.isMarqueeActive, let ms=vm.marqueeStart, let me=vm.marqueeEnd {
                     let r=CGRect(x:min(ms.x,me.x),y:min(ms.y,me.y),width:abs(me.x-ms.x),height:abs(me.y-ms.y))
@@ -964,8 +974,14 @@ struct MashContextMenu: View {
             div()
             row("Duplicate",     "doc.on.doc")    { dup() }
             div()
-            row("Attach Image",  "photo.badge.plus") {
-                vm.showImagePickerForNode = nodeId; vm.showContextMenu = false
+            if doc.nodes[nodeId]?.imageData != nil {
+                row("Replace Image", "photo.badge.arrow.up") {
+                    vm.showImagePickerForNode = nodeId; vm.showContextMenu = false
+                }
+            } else {
+                row("Attach Image",  "photo.badge.plus") {
+                    vm.showImagePickerForNode = nodeId; vm.showContextMenu = false
+                }
             }
             div()
             row("Copy Label",    "doc.on.clipboard") {
@@ -1058,9 +1074,9 @@ struct MashNodeView: View {
             // Image thumbnail (tappable to preview)
             if let imgData = nodeData.imageData, let uiImg = UIImage(data: imgData) {
                 Image(uiImage: uiImg)
-                    .resizable().scaledToFill()
-                    .frame(width: nodeData.width - 8, height: nodeData.type == .image ? 90 : 56)
-                    .clipped()
+                    .resizable()
+                    .scaledToFit()   // fit = full image visible, no cropping
+                    .frame(maxWidth: nodeData.width - 8)
                     .cornerRadius(7)
                     .padding(.horizontal, 4).padding(.top, 4)
             }
