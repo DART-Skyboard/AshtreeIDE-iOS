@@ -89,6 +89,34 @@ class MashCanvasVM: ObservableObject {
         selectedId = newId
     }
 
+    func addASHNode(doc: MashDocument, type: MashNodeType) {
+        let parentId = selectedId ?? doc.rootId
+        guard let parent = doc.nodes[parentId] else { return }
+        var d = doc
+        let newId = UUID().uuidString
+        let defaultText: String
+        switch type {
+        case .ashCode:     defaultText = "// ASH code here"
+        case .outTerminal: defaultText = "terminal.output()"
+        case .out2D:       defaultText = "canvas.render()"
+        case .out3D:       defaultText = "scene.render()"
+        case .inputForm:   defaultText = "input.form()"
+        case .outputForm:  defaultText = "output.display()"
+        case .returnNode:  defaultText = "return result"
+        default:           defaultText = type.rawValue
+        }
+        let node = MashNodeData(id:newId, type:type, text:defaultText,
+            detail:"", url:"", imageData:nil,
+            x:parent.x + 160, y:parent.y,
+            width:150, children:[], parentId:parentId,
+            collapsed:false, fillColor:nil, borderColor:nil,
+            textColor:nil, cornerStyle:nil, fontSize:nil, bold:false, italic:false)
+        d.nodes[newId] = node
+        d.nodes[parentId]?.children.append(newId)
+        store.updateDocument(d)
+        selectedId = newId
+    }
+
     func addImageNode(doc: MashDocument) {
         let parentId = selectedId ?? doc.rootId
         guard let parent = doc.nodes[parentId] else { return }
@@ -709,6 +737,14 @@ struct MashSideToolbar: View {
         ToolItem(icon:"paintpalette.fill")           { showThemePicker = true },
         // Image node
         ToolItem(icon:"photo.badge.plus")            { vm.addImageNode(doc:doc) },
+        // ASH coding node types (always available, especially useful in ASH template)
+        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addASHNode(doc:doc, type:.ashCode) },
+        ToolItem(icon:"terminal")                { vm.addASHNode(doc:doc, type:.outTerminal) },
+        ToolItem(icon:"rectangle.on.rectangle")  { vm.addASHNode(doc:doc, type:.out2D) },
+        ToolItem(icon:"cube")                    { vm.addASHNode(doc:doc, type:.out3D) },
+        ToolItem(icon:"arrow.down.to.line")      { vm.addASHNode(doc:doc, type:.inputForm) },
+        ToolItem(icon:"arrow.up.from.line")      { vm.addASHNode(doc:doc, type:.outputForm) },
+        ToolItem(icon:"arrowshape.turn.up.left") { vm.addASHNode(doc:doc, type:.returnNode) },
         // Export
         ToolItem(icon:"square.and.arrow.up")         { showExport = true },
         // Load code into map
@@ -881,7 +917,10 @@ struct MashCanvas: View {
                         }
                     }.allowsHitTesting(false)
                     // Nodes
-                    ForEach(Array(doc.nodes.values),id:\.id) { n in
+                    // Sort: dragging node last so it renders on top
+                    ForEach(Array(doc.nodes.values).sorted { a, b in
+                        a.id == vm.draggingId ? true : b.id == vm.draggingId ? false : false
+                    }, id:\.id) { n in
                         let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                         MashNodeView(nodeData:n,theme:theme,
                             isSelected:vm.selectedId==n.id||vm.selectedIds.contains(n.id),
@@ -1016,14 +1055,39 @@ struct MashCanvas: View {
                 d.nodes[n.id]?.y = vm.dragStartWorld.y + val.translation.height / vm.scale
                 MashStore.shared.updateDocument(d)
             }
-            .onEnded { _ in
+            .onEnded { val in
                 vm.isDraggingNode = false
-                vm.draggingId     = nil
-                let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
-                if strictLayouts.contains(doc.layout) {
-                    var d = doc
-                    vm.applyAutoLayout(doc: &d)
-                    MashStore.shared.updateDocument(d)
+                // Drop-on-node: check if released near another node → reparent
+                let dropPt = vm.screenToWorld(
+                    CGPoint(x: val.location.x - (UIScreen.main.bounds.width  - sz.width)  / 2,
+                            y: val.location.y - (UIScreen.main.bounds.height - sz.height) / 2 - 44),
+                    sz: sz)
+                var reparented = false
+                for (_, other) in doc.nodes where other.id != n.id {
+                    let dist = sqrt(pow(dropPt.x-other.x, 2) + pow(dropPt.y-other.y, 2))
+                    if dist < (other.width * 0.7) {
+                        // Dropped on another node — reparent
+                        var d = doc
+                        if let oldPid = d.nodes[n.id]?.parentId {
+                            d.nodes[oldPid]?.children.removeAll { $0 == n.id }
+                        }
+                        d.nodes[n.id]?.parentId = other.id
+                        if !(d.nodes[other.id]?.children.contains(n.id) ?? false) {
+                            d.nodes[other.id]?.children.append(n.id)
+                        }
+                        MashStore.shared.updateDocument(d)
+                        reparented = true
+                        break
+                    }
+                }
+                vm.draggingId = nil
+                if !reparented {
+                    let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
+                    if strictLayouts.contains(doc.layout) {
+                        var d = doc
+                        vm.applyAutoLayout(doc: &d)
+                        MashStore.shared.updateDocument(d)
+                    }
                 }
             }
     }
@@ -1134,13 +1198,34 @@ struct MashNodeView: View {
     var borderHex: String { nodeData.borderColor ?? borderForType }
     var textHex:   String { nodeData.textColor   ?? textForType }
 
+    struct ASHBadge { let icon: String; let label: String; let color: Color }
+    var ashBadge: ASHBadge? {
+        switch nodeData.type {
+        case .ashCode:     return ASHBadge(icon:"chevron.left.forwardslash.chevron.right", label:"ASH", color:Color(hex:"#00ffcc"))
+        case .outTerminal: return ASHBadge(icon:"terminal",            label:"TERMINAL OUT", color:Color(hex:"#00ff66"))
+        case .out2D:       return ASHBadge(icon:"rectangle.on.rectangle", label:"2D OUT",   color:Color(hex:"#aa77ff"))
+        case .out3D:       return ASHBadge(icon:"cube",                label:"3D OUT",      color:Color(hex:"#ffaa00"))
+        case .inputForm:   return ASHBadge(icon:"arrow.down.to.line",  label:"INPUT",       color:Color(hex:"#00ccff"))
+        case .outputForm:  return ASHBadge(icon:"arrow.up.from.line",  label:"OUTPUT",      color:Color(hex:"#ff6688"))
+        case .returnNode:  return ASHBadge(icon:"arrowshape.turn.up.left", label:"RETURN",  color:Color(hex:"#ffee44"))
+        default: return nil
+        }
+    }
+
     var fillForType: String {
         switch nodeData.type {
-        case .root:     return theme.rootFill
-        case .main:     return theme.mainFill
-        case .subtitle: return theme.subtitleFill
-        case .category: return theme.categoryFill
-        default:        return theme.noteFill
+        case .root:        return theme.rootFill
+        case .main:        return theme.mainFill
+        case .subtitle:    return theme.subtitleFill
+        case .category:    return theme.categoryFill
+        case .ashCode:     return "#0d1f2d"   // dark blue-black for code
+        case .outTerminal: return "#0a1a0a"   // terminal green-black
+        case .out2D:       return "#1a0d2e"   // purple for 2D/vector
+        case .out3D:       return "#1a1200"   // amber-black for 3D
+        case .inputForm:   return "#0d1a1a"   // teal-black for input
+        case .outputForm:  return "#1a0d0d"   // red-black for output
+        case .returnNode:  return "#1a1a0d"   // yellow-black for return
+        default:           return theme.noteFill
         }
     }
     var borderForType: String {
@@ -1187,10 +1272,27 @@ struct MashNodeView: View {
                     .padding(.horizontal, 4).padding(.top, 4)
             }
 
+            // ASH node type badge
+            if let badge = ashBadge {
+                HStack(spacing:4) {
+                    Image(systemName: badge.icon)
+                        .font(.system(size:9, weight:.bold))
+                        .foregroundColor(badge.color)
+                    Text(badge.label)
+                        .font(.system(size:7, weight:.bold, design:.monospaced))
+                        .foregroundColor(badge.color)
+                        .kerning(0.5)
+                }
+                .padding(.horizontal,8).padding(.vertical,3)
+                .background(badge.color.opacity(0.15))
+                .cornerRadius(4)
+                .padding(.top, 4)
+            }
+
             Text(nodeData.text)
                 .font(.system(size: fontSize,
                               weight: nodeData.bold ? .bold : .regular,
-                              design: .default))
+                              design: nodeData.type == .ashCode ? .monospaced : .default))
                 .italic(nodeData.italic)
                 .foregroundColor(Color(hex: textHex))
                 .multilineTextAlignment(.center)
@@ -1725,70 +1827,81 @@ struct MashExportSheet: View {
         }
         ctx.setLineDash(phase:0,lengths:[])
 
-        // Nodes — match in-app rendering exactly (scaledToFit image + label)
+        // Nodes — pixel-perfect match to MashNodeView in-app rendering
         for n in allNodes {
             let fillC = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
             let bordC = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
             let txtC  = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
 
-            // Scale node width with fit scale (same as position transform)
-            let nw: CGFloat = n.width * s
+            // World width × fit scale (same transform used for positioning)
+            let nw = n.width * s
 
-            // Normalize EXIF orientation then compute scaledToFit height
-            // In-app: .scaledToFit().frame(maxWidth: width-8) → h = (w-8)*imgH/imgW
+            // Image: matches SwiftUI .resizable().scaledToFit().frame(maxWidth: nodeData.width-8)
             var exportImg: UIImage? = nil
-            var imgAreaH:  CGFloat  = 0
-            let imgBoxW = (n.width - 8) * s
+            var imgRenderH: CGFloat = 0
+            let imgMaxW = (n.width - 8) * s   // same as maxWidth: nodeData.width-8 scaled
             if let dat = n.imageData, let raw = UIImage(data: dat) {
-                let norm: UIImage
-                if raw.imageOrientation == .up {
-                    norm = raw
-                } else {
+                // Normalize EXIF orientation
+                let img: UIImage
+                if raw.imageOrientation == .up { img = raw }
+                else {
                     UIGraphicsBeginImageContextWithOptions(raw.size, false, raw.scale)
                     raw.draw(in: CGRect(origin:.zero, size:raw.size))
-                    norm = UIGraphicsGetImageFromCurrentImageContext() ?? raw
+                    img = UIGraphicsGetImageFromCurrentImageContext() ?? raw
                     UIGraphicsEndImageContext()
                 }
-                exportImg = norm
-                // scaledToFit: h = boxW * (imgH/imgW)
-                let iw = Swift.max(1, norm.size.width)
-                let ih = norm.size.height
-                imgAreaH = imgBoxW * (ih/iw) + 4*s + 4*s  // + top pad + bottom gap
+                exportImg   = img
+                // scaledToFit: height scales proportionally to fit imgMaxW wide
+                imgRenderH  = imgMaxW * img.size.height / Swift.max(1, img.size.width)
             }
 
-            // Text height with wrapping (matches .padding(.horizontal,8).padding(.vertical,6))
-            let fs:   CGFloat = (n.fontSize.map{CGFloat($0)} ?? (n.type == .root ? 13:10)) * s
-            let fnt   = n.bold ? UIFont.boldSystemFont(ofSize:fs) : UIFont.systemFont(ofSize:fs)
+            // Text metrics — match SwiftUI font sizes
+            let fontSize: CGFloat
+            switch n.type {
+            case .root:     fontSize = 15 * Swift.min(s, 1.5)
+            case .main:     fontSize = 13 * Swift.min(s, 1.5)
+            case .subtitle: fontSize = 11 * Swift.min(s, 1.5)
+            default:        fontSize = 10 * Swift.min(s, 1.5)
+            }
+            let fnt = n.bold ? UIFont.boldSystemFont(ofSize:fontSize)
+                             : UIFont.systemFont(ofSize:fontSize)
             let atr: [NSAttributedString.Key:Any] = [.font:fnt, .foregroundColor:txtC]
-            let str   = NSAttributedString(string: n.text, attributes: atr)
-            let txtBR = str.boundingRect(
-                with: CGSize(width: nw - 16*s, height: 1000),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
-            let lblH  = txtBR.height + 12*s  // 6pt vertical padding × 2
+            let str = NSAttributedString(string:n.text, attributes:atr)
+            // Measure wrapped text at node width (matches .padding(.horizontal,8))
+            let hPad: CGFloat = 8*Swift.min(s,1.5)
+            let vPad: CGFloat = 6*Swift.min(s,1.5)
+            let txtBounds = str.boundingRect(
+                with: CGSize(width: nw - hPad*2, height: 500),
+                options: [.usesLineFragmentOrigin,.usesFontLeading], context:nil)
+            let lblH = txtBounds.height + vPad*2
 
-            let nh   = imgAreaH + lblH
-            let rect = CGRect(x: px(n.x)-nw/2, y: py(n.y)-nh/2, width: nw, height: nh)
-            let cr   = 10 * Swift.min(s, 1)
-            let np   = UIBezierPath(roundedRect: rect, cornerRadius: cr)
-            fillC.setFill();   np.fill()
-            bordC.setStroke(); np.lineWidth = Swift.max(1, 1.5*Swift.min(s,1)); np.stroke()
+            // Total node height = image area + label
+            let imgTopPad:  CGFloat = imgRenderH > 0 ? 4*Swift.min(s,1.5) : 0
+            let imgHPad:    CGFloat = imgRenderH > 0 ? 4*Swift.min(s,1.5) : 0
+            let totalImgH   = imgRenderH > 0 ? imgRenderH + imgTopPad + imgHPad : 0
+            let nh          = totalImgH + lblH
 
-            // Image (scaledToFit, matches app exactly)
-            if let uiImg = exportImg {
-                let hPad   = (nw - imgBoxW) / 2
-                let imgH2  = imgBoxW * (uiImg.size.height / Swift.max(1, uiImg.size.width))
-                let imgRect = CGRect(x: rect.minX+hPad, y: rect.minY+4*s,
-                                     width: imgBoxW, height: imgH2)
+            let rect = CGRect(x:px(n.x)-nw/2, y:py(n.y)-nh/2, width:nw, height:nh)
+            let cr   = 10*Swift.min(s,1.2)
+            let path = UIBezierPath(roundedRect:rect, cornerRadius:cr)
+            fillC.setFill();   path.fill()
+            bordC.setStroke(); path.lineWidth = Swift.max(1,1.5*Swift.min(s,1)); path.stroke()
+
+            // Draw image: centered horizontally, scaledToFit
+            if let img = exportImg, imgRenderH > 0 {
+                let imgX = rect.minX + (nw - imgMaxW)/2   // centered like maxWidth
+                let imgRect = CGRect(x:imgX, y:rect.minY+imgTopPad,
+                                     width:imgMaxW, height:imgRenderH)
                 ctx.saveGState()
-                UIBezierPath(roundedRect: imgRect, cornerRadius: 7*Swift.min(s,1)).addClip()
-                uiImg.draw(in: imgRect)
+                UIBezierPath(roundedRect:imgRect, cornerRadius:7*Swift.min(s,1)).addClip()
+                img.draw(in:imgRect)
                 ctx.restoreGState()
             }
 
-            // Label centered below image
-            let ty = rect.minY + imgAreaH + (lblH - txtBR.height)/2
-            str.draw(in: CGRect(x: rect.minX+8*s, y: ty,
-                                width: nw-16*s, height: lblH))
+            // Draw label: centered below image
+            let ty = rect.minY + totalImgH + (lblH - txtBounds.height)/2
+            str.draw(in:CGRect(x:rect.minX+hPad, y:ty,
+                               width:nw-hPad*2, height:txtBounds.height+2))
         }
         let img = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
