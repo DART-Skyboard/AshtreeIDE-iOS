@@ -17,7 +17,14 @@ public enum MashNodeType: String, Codable, CaseIterable {
     case category   = "category"    // Group label
     case note       = "note"        // Information leaf
     case image      = "image"       // Image node
-    case link       = "link"        // Hyperlink node
+    case link       = "link"        // URL link node
+    // ASH language coding nodes
+    case ashCode    = "ash_code"    // ASH syntax block
+    case ashInput   = "ash_input"   // Input form / stdin
+    case ashOutput  = "ash_output"  // Output form / stdout terminal
+    case ash2D      = "ash_2d"      // 2D canvas output (HTML/SVG/vector)
+    case ash3D      = "ash_3d"      // 3D scene output (WebGL/Three.js/SceneKit)
+    case ashReturn  = "ash_return"  // Return / response value node        // Hyperlink node
 
     public var defaultRadius: CGFloat {
         switch self {
