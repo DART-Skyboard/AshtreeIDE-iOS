@@ -137,14 +137,29 @@ struct IDETabContent: View {
                         Button {
                             withAnimation(.easeInOut(duration: 0.18)) { ideVM.selectedTab = tab }
                         } label: {
-                            HStack(spacing: 5) {
+                            HStack(spacing: 4) {
                                 Image(systemName: tab.icon)
-                                    .font(.system(size: 10, weight: ideVM.selectedTab == tab ? .semibold : .regular))
+                                    .font(.system(size: 10,
+                                          weight: ideVM.selectedTab == tab ? .bold : .semibold))
                                 Text(tab.rawValue)
-                                    .font(.system(size: 10, weight: ideVM.selectedTab == tab ? .semibold : .regular))
+                                    .font(.system(size: 10,
+                                          weight: ideVM.selectedTab == tab ? .bold : .semibold,
+                                          design: .monospaced))
                             }
-                            .foregroundColor(ideVM.selectedTab == tab ? themeVM.accent : themeVM.dim)
-                            .padding(.horizontal, 14)
+                            .foregroundColor(ideVM.selectedTab == tab ? .black : themeVM.accent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(ideVM.selectedTab == tab
+                                        ? themeVM.accent
+                                        : themeVM.accent.opacity(0.13))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(themeVM.accent.opacity(
+                                        ideVM.selectedTab == tab ? 0 : 0.35), lineWidth: 0.5)
+                            )
                             .frame(height: 36)
                             .overlay(
                                 Rectangle()
