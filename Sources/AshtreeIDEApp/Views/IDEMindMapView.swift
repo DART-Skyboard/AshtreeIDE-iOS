@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 // MARK: - Tool Enum
 
-enum MashTool { case select, connect, pan, marquee }
+enum MashTool { case select, connect, connectSingle, mainLink, pan, marquee }
 enum MashToolbarSide { case left, right, top, bottom }
 
 // MARK: - Canvas ViewModel
@@ -34,8 +34,13 @@ class MashCanvasVM: ObservableObject {
     // Context menu
     @Published var contextNodeId:   String? = nil
     @Published var showContextMenu: Bool = false
+    // Connection selection + editing
+    @Published var selectedConnId:  String? = nil
+    @Published var showConnMenu:    Bool = false
     // Toolbar snap
     @Published var toolbarSide:     MashToolbarSide = .left
+    // Image picker trigger
+    @Published var showImagePickerForNode: String? = nil
     // Pan accumulator
     var lastPanTranslation:         CGPoint = .zero
     // Zoom
@@ -99,33 +104,97 @@ class MashCanvasVM: ObservableObject {
     }
 
     func deleteSelected(doc: MashDocument) {
-        let ids = selectedIds.isEmpty ? (selectedId.map{Set([$0])} ?? []) : selectedIds
+        let ids = selectedIds.isEmpty ? (selectedId.map { Set([$0]) } ?? []) : selectedIds
         guard !ids.isEmpty else { return }
         var d = doc
-        func rm(_ nid: String) {
-            guard nid != doc.rootId else { return }
-            if let pid = d.nodes[nid]?.parentId { d.nodes[pid]?.children.removeAll{$0==nid} }
-            d.nodes[nid]?.children.forEach { rm($0) }
+        for nid in ids {
+            guard nid != doc.rootId, let node = d.nodes[nid] else { continue }
+            let grandParentId = node.parentId ?? doc.rootId
+            // Re-parent children to grandparent (don't delete them)
+            for childId in node.children {
+                d.nodes[childId]?.parentId = grandParentId
+                if !d.nodes[grandParentId]?.children.contains(childId) ?? false {
+                    d.nodes[grandParentId]?.children.append(childId)
+                }
+            }
+            // Remove from parent's children list
+            if let pid = node.parentId {
+                d.nodes[pid]?.children.removeAll { $0 == nid }
+            }
             d.nodes.removeValue(forKey: nid)
         }
-        ids.forEach { rm($0) }
+        // Remove reference connections to deleted nodes (tree edges auto-heal above)
         d.connections.removeAll { ids.contains($0.fromId) || ids.contains($0.toId) }
         store.updateDocument(d)
         selectedId = nil; selectedIds = []
     }
 
+    // Delete a specific reference connection
+    func deleteConnection(_ id: String, doc: MashDocument) {
+        var d = doc
+        d.connections.removeAll { $0.id == id }
+        store.updateDocument(d)
+        selectedConnId = nil; showConnMenu = false
+    }
+
+    // Add a free-standing node (no parent link — user links manually)
+    func addFreeNode(doc: MashDocument) {
+        var d = doc
+        let newId = UUID().uuidString
+        let cx = (d.nodes.values.map { $0.x }.reduce(0,+) / CGFloat(max(1, d.nodes.count))) + 120
+        let cy = (d.nodes.values.map { $0.y }.reduce(0,+) / CGFloat(max(1, d.nodes.count))) + 120
+        let node = MashNodeData(id:newId, type:.main, text:"New Node",
+            detail:"", url:"", imageData:nil,
+            x:cx, y:cy, width:130, children:[], parentId:nil,
+            collapsed:false, fillColor:nil, borderColor:nil,
+            textColor:nil, cornerStyle:nil, fontSize:nil, bold:false, italic:false)
+        d.nodes[newId] = node
+        store.updateDocument(d)
+        selectedId = newId
+    }
+
     func handleNodeTap(_ id: String, doc: MashDocument) {
-        showContextMenu = false
+        showContextMenu = false; showConnMenu = false; selectedConnId = nil
         switch tool {
         case .select:
             selectedId  = (selectedId == id) ? nil : id
             selectedIds = selectedId != nil ? [selectedId!] : []
         case .connect:
+            // Bidirectional dashed reference curve (↔)
             if connectionFirst == nil {
                 connectionFirst = id
             } else if connectionFirst != id {
                 var d = doc
-                d.connections.append(MashConnection(from:connectionFirst!, to:id, arrow:.forward))
+                var c = MashConnection(from:connectionFirst!, to:id, arrow:.both)
+                c.dashed = true
+                d.connections.append(c)
+                store.updateDocument(d)
+                connectionFirst = nil; tool = .select
+            }
+        case .connectSingle:
+            // Single-direction dashed curve (→)
+            if connectionFirst == nil {
+                connectionFirst = id
+            } else if connectionFirst != id {
+                var d = doc
+                var c = MashConnection(from:connectionFirst!, to:id, arrow:.forward)
+                c.dashed = true
+                d.connections.append(c)
+                store.updateDocument(d)
+                connectionFirst = nil; tool = .select
+            }
+        case .mainLink:
+            // Solid main tree-edge between two nodes (reparents second to first)
+            if connectionFirst == nil {
+                connectionFirst = id
+            } else if connectionFirst != id {
+                var d = doc
+                // Remove old parent link for target
+                if let oldPid = d.nodes[id]?.parentId {
+                    d.nodes[oldPid]?.children.removeAll { $0 == id }
+                }
+                d.nodes[id]?.parentId = connectionFirst!
+                d.nodes[connectionFirst!]?.children.append(id)
                 store.updateDocument(d)
                 connectionFirst = nil; tool = .select
             }
@@ -457,8 +526,10 @@ struct MashCanvasView: View {
                         .overlay(RoundedRectangle(cornerRadius:6).stroke(themeVM.accent.opacity(0.3),lineWidth:0.5))
                     }
                     Spacer()
-                    if vm.tool == .connect {
-                        Text(vm.connectionFirst == nil ? "Tap first node" : "Tap second node")
+                    if vm.tool == .connect || vm.tool == .connectSingle || vm.tool == .mainLink {
+                        let arrow = vm.tool == .connect ? "↔" : vm.tool == .mainLink ? "—" : "→"
+                        let lbl   = vm.connectionFirst == nil ? "\(arrow) Tap source" : "\(arrow) Tap target"
+                        Text(lbl)
                             .font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(.orange)
                             .padding(.horizontal,8).padding(.vertical,4).background(Color.orange.opacity(0.15)).cornerRadius(6)
                     }
@@ -505,6 +576,14 @@ struct MashCanvasView: View {
             MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
                 .environmentObject(themeVM).environmentObject(ideVM)
         }
+        // Image picker triggered from context menu "Attach Image"
+        .sheet(item: Binding(
+            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
+            set: { vm.showImagePickerForNode = $0?.id }
+        )) { target in
+            NodeImagePickerSheet(nodeId: target.id, doc: doc)
+                .environmentObject(themeVM)
+        }
         .sheet(isPresented: $showNodeEditor) {
             if let id=vm.selectedId, let n=doc.nodes[id] {
                 MashNodeEditorSheet(nodeData:n,doc:doc,isPresented:$showNodeEditor)
@@ -545,17 +624,33 @@ struct MashSideToolbar: View {
     }
 
     var items: [ToolItem] { [
-        ToolItem(icon:"plus.circle.fill")           { vm.addChildToSelected(doc:doc) },
-        ToolItem(icon:"hand.tap.fill")              { vm.tool = .select },
-        ToolItem(icon:"link")                       { vm.tool = vm.tool == .connect ? .select : .connect },
-        ToolItem(icon:"rectangle.dashed.badge.plus"){ vm.tool = vm.tool == .marquee ? .select : .marquee },
-        ToolItem(icon:"paintpalette.fill")          { showThemePicker = true },
-        ToolItem(icon:"photo.badge.plus")           { vm.addImageNode(doc:doc) },
-        ToolItem(icon:"square.and.arrow.up")        { showExport = true },
+        // Add child node (linked to selected)
+        ToolItem(icon:"plus.circle.fill")            { vm.addChildToSelected(doc:doc) },
+        // Add free node (no auto-link)
+        ToolItem(icon:"plus.square")                 { vm.addFreeNode(doc:doc) },
+        // Select
+        ToolItem(icon:"hand.tap.fill")               { vm.tool = .select },
+        // Main solid link (reparents — solid tree edge)
+        ToolItem(icon:"line.diagonal")               { vm.tool = vm.tool == .mainLink ? .select : .mainLink },
+        // Bidirectional dashed reference link (↔)
+        ToolItem(icon:"arrow.left.and.right")        { vm.tool = vm.tool == .connect ? .select : .connect },
+        // Single-direction dashed reference link (→)
+        ToolItem(icon:"arrow.right")                 { vm.tool = vm.tool == .connectSingle ? .select : .connectSingle },
+        // Marquee select
+        ToolItem(icon:"rectangle.dashed.badge.plus") { vm.tool = vm.tool == .marquee ? .select : .marquee },
+        // Theme
+        ToolItem(icon:"paintpalette.fill")           { showThemePicker = true },
+        // Image node
+        ToolItem(icon:"photo.badge.plus")            { vm.addImageNode(doc:doc) },
+        // Export
+        ToolItem(icon:"square.and.arrow.up")         { showExport = true },
+        // Load code into map
         ToolItem(icon:"square.and.arrow.down.on.square"){ showLoadFromEditor = true },
-        ToolItem(icon:"play.fill")                  { onBuildRun() },
-        ToolItem(icon:"plus.square.on.square")      { showNewDoc = true },
-        ToolItem(icon:"folder.fill")                { showDocList = true },
+        // Build & Run
+        ToolItem(icon:"play.fill")                   { onBuildRun() },
+        // New map / Open map
+        ToolItem(icon:"plus.square.on.square")       { showNewDoc = true },
+        ToolItem(icon:"folder.fill")                 { showDocList = true },
     ]}
 
     var body: some View {
@@ -619,8 +714,10 @@ struct MashSideToolbar: View {
 
     private func isActive(_ icon: String) -> Bool {
         switch icon {
-        case "hand.tap.fill":            return vm.tool == .select
-        case "link":                     return vm.tool == .connect
+        case "hand.tap.fill":              return vm.tool == .select
+        case "line.diagonal":              return vm.tool == .mainLink
+        case "arrow.left.and.right":       return vm.tool == .connect
+        case "arrow.right":                return vm.tool == .connectSingle
         case "rectangle.dashed.badge.plus": return vm.tool == .marquee
         default: return false
         }
@@ -660,6 +757,25 @@ struct MashCanvas: View {
                 }
                 // World content — clipped
                 ZStack(alignment:.topLeading) {
+                    // Tap targets for reference connections (invisible, for selection)
+                    ForEach(doc.connections, id:\.id) { conn in
+                        if let fn = doc.nodes[conn.fromId], let tn = doc.nodes[conn.toId] {
+                            let fsp = vm.worldToScreen(CGPoint(x:fn.x,y:fn.y),sz:sz)
+                            let tsp = vm.worldToScreen(CGPoint(x:tn.x,y:tn.y),sz:sz)
+                            let mx = (fsp.x+tsp.x)/2; let my = (fsp.y+tsp.y)/2
+                            Circle()
+                                .fill(Color.clear)
+                                .frame(width:32,height:32)
+                                .contentShape(Circle())
+                                .position(CGPoint(x:mx,y:my))
+                                .onTapGesture {
+                                    vm.selectedConnId  = conn.id
+                                    vm.showConnMenu    = true
+                                    vm.showContextMenu = false
+                                }
+                        }
+                    }
+
                     // Connections
                     Canvas { ctx, _ in
                         for (_,node) in doc.nodes {
@@ -707,13 +823,43 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                .gesture(canvasPan(sz:sz))
-                .gesture(MagnificationGesture()
-                    .onChanged{v in vm.scale=Swift.min(Swift.max(vm.baseScale*v, vm.minScale), vm.maxScale)}
-                    .onEnded{_ in vm.baseScale=vm.scale})
-                .onTapGesture{guard !vm.isDraggingNode else{return}
-                    vm.selectedId=nil;vm.selectedIds=[];vm.showContextMenu=false}
-                // Context menu (not clipped)
+                .simultaneousGesture(canvasPan(sz:sz))
+                .simultaneousGesture(MagnificationGesture()
+                    .onChanged { v in
+                        vm.scale = Swift.min(Swift.max(vm.baseScale * v, vm.minScale), vm.maxScale)
+                    }
+                    .onEnded { _ in vm.baseScale = vm.scale })
+                .onTapGesture {
+                    guard !vm.isDraggingNode else { return }
+                    vm.selectedId = nil; vm.selectedIds = []
+                    vm.showContextMenu = false; vm.selectedConnId = nil
+                }
+                // Connection context menu (tap near midpoint of a ref connection)
+                if vm.showConnMenu, let connId = vm.selectedConnId,
+                   let conn = doc.connections.first(where:{$0.id==connId}),
+                   let fn = doc.nodes[conn.fromId], let tn = doc.nodes[conn.toId] {
+                    // Midpoint in screen space
+                    let fsp = vm.worldToScreen(CGPoint(x:fn.x,y:fn.y),sz:sz)
+                    let tsp = vm.worldToScreen(CGPoint(x:tn.x,y:tn.y),sz:sz)
+                    let mx  = (fsp.x+tsp.x)/2
+                    let my  = (fsp.y+tsp.y)/2
+                    VStack(spacing:0) {
+                        Button {
+                            vm.deleteConnection(connId, doc:doc)
+                        } label: {
+                            HStack(spacing:8) {
+                                Image(systemName:"trash").font(.system(size:12)).foregroundColor(.red)
+                                Text("Delete Link").font(.system(size:11,design:.monospaced)).foregroundColor(.red)
+                            }
+                            .padding(.horizontal,14).padding(.vertical,10)
+                        }.buttonStyle(.plain)
+                    }
+                    .background(RoundedRectangle(cornerRadius:10).fill(Color(hex:"#161b22").opacity(0.97)).shadow(color:.black.opacity(0.5),radius:12))
+                    .overlay(RoundedRectangle(cornerRadius:10).stroke(Color(hex:"#30363d"),lineWidth:0.5))
+                    .position(CGPoint(x:Swift.min(Swift.max(mx,60),sz.width-60), y:Swift.min(Swift.max(my-50,40),sz.height-80)))
+                }
+
+                // Node context menu (not clipped)
                 if vm.showContextMenu, let nid=vm.contextNodeId, let n=doc.nodes[nid] {
                     let sp=vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                     MashContextMenu(nodeId:nid,doc:doc,vm:vm)
@@ -812,17 +958,30 @@ struct MashContextMenu: View {
     var node:MashNodeData? { doc.nodes[nodeId] }
     var body: some View {
         VStack(spacing:0) {
-            row("Edit Node","pencil")   {vm.showContextMenu=false;vm.selectedId=nodeId}
+            row("Edit Node",     "pencil")        { vm.showContextMenu=false; vm.selectedId=nodeId }
             div()
-            row("Add Child","plus.circle") {vm.addChildToSelected(doc:doc);vm.showContextMenu=false}
+            row("Add Child",     "plus.circle")   { vm.addChildToSelected(doc:doc); vm.showContextMenu=false }
             div()
-            row("Duplicate","doc.on.doc") {dup()}
+            row("Duplicate",     "doc.on.doc")    { dup() }
             div()
-            row("Copy Label","doc.on.clipboard"){UIPasteboard.general.string=node?.text ?? "";vm.showContextMenu=false}
-            if let u=node?.url,!u.isEmpty { div()
-                row("Open Link","link"){if let url=URL(string:u){UIApplication.shared.open(url)};vm.showContextMenu=false} }
+            row("Attach Image",  "photo.badge.plus") {
+                vm.showImagePickerForNode = nodeId; vm.showContextMenu = false
+            }
             div()
-            row("Delete","trash",red:true){vm.deleteSelected(doc:doc);vm.showContextMenu=false}
+            row("Copy Label",    "doc.on.clipboard") {
+                UIPasteboard.general.string = node?.text ?? ""; vm.showContextMenu=false
+            }
+            if let u = node?.url, !u.isEmpty {
+                div()
+                row("Open Link", "link") {
+                    if let url=URL(string:u) { UIApplication.shared.open(url) }
+                    vm.showContextMenu=false
+                }
+            }
+            div()
+            row("Delete Node",   "trash", red:true) {
+                vm.deleteSelected(doc:doc); vm.showContextMenu=false
+            }
         }
         .frame(width:210)
         .background(RoundedRectangle(cornerRadius:13).fill(Color(hex:"#161b22").opacity(0.97)).shadow(color:.black.opacity(0.55),radius:18,y:8))
@@ -896,12 +1055,14 @@ struct MashNodeView: View {
 
     var body: some View {
         VStack(spacing:4) {
-            // Image attachment
+            // Image thumbnail (tappable to preview)
             if let imgData = nodeData.imageData, let uiImg = UIImage(data: imgData) {
                 Image(uiImage: uiImg)
                     .resizable().scaledToFill()
-                    .frame(width: nodeData.width - 16, height: 60)
-                    .clipped().cornerRadius(6)
+                    .frame(width: nodeData.width - 8, height: nodeData.type == .image ? 90 : 56)
+                    .clipped()
+                    .cornerRadius(7)
+                    .padding(.horizontal, 4).padding(.top, 4)
             }
 
             Text(nodeData.text)
@@ -958,6 +1119,7 @@ struct MashNodeEditorSheet: View {
     @State private var type:   MashNodeType = .note
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
+    @FocusState private var labelFocused: Bool
 
     var body: some View {
         NavigationView {
@@ -983,7 +1145,19 @@ struct MashNodeEditorSheet: View {
                         }
 
                         // Text
-                        field("Label", binding: $text, mono: false)
+                        // Label field with auto-focus
+                        VStack(alignment:.leading, spacing:4) {
+                            Text("LABEL".uppercased())
+                                .font(.system(size:7,weight:.bold,design:.monospaced))
+                                .foregroundColor(themeVM.dim).kerning(1.5)
+                            TextField("Node label", text: $text, axis: .vertical)
+                                .font(.system(size:13))
+                                .foregroundColor(themeVM.accent)
+                                .focused($labelFocused)
+                                .padding(10).background(Color(hex:"#161b22")).cornerRadius(8)
+                                .overlay(RoundedRectangle(cornerRadius:8)
+                                    .stroke(labelFocused ? themeVM.accent : Color(hex:"#21262d"), lineWidth:0.5))
+                        }
                         field("Notes / Detail", binding: $detail, mono: false)
                         field("Hyperlink URL", binding: $url, mono: true)
 
@@ -1032,6 +1206,10 @@ struct MashNodeEditorSheet: View {
                 italic = nodeData.italic
                 type   = nodeData.type
                 if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
+                // Auto-focus label field after sheet appears
+                DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
+                    labelFocused = true
+                }
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -1516,5 +1694,60 @@ struct MashLoadFromEditorSheet: View {
     }
 }
 
+
+// MARK: - Node Image Picker
+
+struct NodeImageTarget: Identifiable {
+    let id: String
+}
+
+struct NodeImagePickerSheet: View {
+    let nodeId: String
+    let doc:    MashDocument
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @Environment(\.dismiss) var dismiss
+    @State private var pickedImage: UIImage? = nil
+    @State private var showPicker  = true
+
+    var body: some View {
+        ZStack {
+            Color(hex:"#0d1117").ignoresSafeArea()
+            if let img = pickedImage {
+                VStack(spacing:16) {
+                    Image(uiImage: img)
+                        .resizable().scaledToFit()
+                        .frame(maxHeight:300).cornerRadius(12)
+                    HStack(spacing:16) {
+                        Button("Attach to Node") {
+                            var d = doc
+                            d.nodes[nodeId]?.imageData = img.jpegData(compressionQuality:0.8)
+                            if d.nodes[nodeId]?.type == .note || d.nodes[nodeId]?.type == .subtitle {
+                                d.nodes[nodeId]?.type = .image  // promote to image node
+                            }
+                            MashStore.shared.updateDocument(d)
+                            dismiss()
+                        }
+                        .font(.system(size:12,weight:.semibold))
+                        .foregroundColor(.black).padding(.horizontal,20).padding(.vertical,10)
+                        .background(themeVM.accent).cornerRadius(10)
+                        Button("Cancel") { dismiss() }
+                            .font(.system(size:12,design:.monospaced))
+                            .foregroundColor(themeVM.dim)
+                    }
+                }
+                .padding(20)
+            } else {
+                VStack(spacing:12) {
+                    ProgressView().tint(themeVM.accent)
+                    Text("Opening photo library…")
+                        .font(.system(size:11,design:.monospaced)).foregroundColor(themeVM.dim)
+                }
+            }
+        }
+        .sheet(isPresented: $showPicker) {
+            ImagePickerView(selectedImage: $pickedImage)
+        }
+    }
+}
 
 // ShareSheet is defined in IDEMainView.swift
