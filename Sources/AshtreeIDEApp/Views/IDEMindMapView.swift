@@ -344,6 +344,24 @@ struct MashNewDocSheet: View {
                     VStack(alignment:.leading, spacing:8) {
                         Text("LAYOUT").font(.system(size:8,weight:.bold,design:.monospaced))
                             .foregroundColor(themeVM.dim).kerning(1.5)
+                        // ASH coding template shortcut
+                        Button {
+                            layout = .flowchart
+                        } label: {
+                            HStack(spacing:6) {
+                                Image(systemName:"chevron.left.forwardslash.chevron.right").font(.system(size:14))
+                                    .foregroundColor(layout == .flowchart ? .black : Color(hex:"#00ffcc"))
+                                Text("ASH Language Map")
+                                    .font(.system(size:10,weight:.semibold,design:.monospaced))
+                                    .foregroundColor(layout == .flowchart ? .black : Color(hex:"#00ffcc"))
+                            }
+                            .frame(maxWidth:.infinity).padding(.vertical,10)
+                            .background(layout == .flowchart ? Color(hex:"#00ffcc") : Color(hex:"#00ffcc").opacity(0.08))
+                            .cornerRadius(8)
+                            .overlay(RoundedRectangle(cornerRadius:8).stroke(Color(hex:"#00ffcc").opacity(0.4),lineWidth:0.5))
+                        }
+                        .buttonStyle(.plain).padding(.bottom,6)
+                        Text("or choose a layout:").font(.system(size:8,design:.monospaced)).foregroundColor(themeVM.dim)
                         LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible()),GridItem(.flexible())],spacing:8) {
                             ForEach(MashLayout.allCases, id:\.self) { l in
                                 Button { layout = l } label: {
@@ -532,6 +550,19 @@ struct MashCanvasView: View {
                         Text(lbl)
                             .font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(.orange)
                             .padding(.horizontal,8).padding(.vertical,4).background(Color.orange.opacity(0.15)).cornerRadius(6)
+                    }
+                    // Curve style toggle: bezier ↔ flowchart
+                    Button {
+                        var d = doc
+                        d.customTheme = d.customTheme ?? MashTheme.builtIn.first{$0.id==d.themeId} ?? MashTheme.builtIn[0]
+                        d.customTheme!.connectionStyle = d.customTheme!.connectionStyle == .straight ? .curved : .straight
+                        MashStore.shared.updateDocument(d)
+                    } label: {
+                        let isFlowchart = (doc.customTheme?.connectionStyle ?? (MashTheme.builtIn.first{$0.id==doc.themeId} ?? MashTheme.builtIn[0]).connectionStyle) == .straight
+                        Image(systemName: isFlowchart ? "arrow.turn.right.down" : "bezier")
+                            .font(.system(size:11)).foregroundColor(isFlowchart ? .orange : themeVM.accent)
+                            .padding(5).background((isFlowchart ? Color.orange : themeVM.accent).opacity(0.1))
+                            .cornerRadius(6)
                     }
                     Button { vm.cycleLayout(doc:doc) } label: {
                         Text(doc.layout.displayName).font(.system(size:8,design:.monospaced)).foregroundColor(themeVM.accent)
@@ -905,39 +936,7 @@ struct MashCanvas: View {
             }
     }
 
-    // ── Canvas pan / marquee ──────────────────────────────
-    private func canvasPan(sz:CGSize) -> some Gesture {
-        DragGesture(minimumDistance:4, coordinateSpace:.local)
-            .onChanged { val in
-                guard !vm.isDraggingNode else { return }
-                if vm.tool == .marquee {
-                    // Marquee selection drag
-                    if vm.marqueeStart == nil {
-                        vm.marqueeStart    = val.startLocation
-                        vm.isMarqueeActive = true
-                    }
-                    vm.marqueeEnd = val.location
-                } else {
-                    // Pan — accumulate delta since last frame only
-                    let dx = val.translation.width  - vm.lastPanTranslation.x
-                    let dy = val.translation.height - vm.lastPanTranslation.y
-                    vm.offset = CGPoint(x: vm.offset.x + dx/vm.scale,
-                                        y: vm.offset.y + dy/vm.scale)
-                    vm.lastPanTranslation = CGPoint(x:val.translation.width,
-                                                    y:val.translation.height)
-                }
-            }
-            .onEnded { _ in
-                vm.lastPanTranslation = .zero
-                if vm.isMarqueeActive, let ms=vm.marqueeStart, let me=vm.marqueeEnd {
-                    let r=CGRect(x:min(ms.x,me.x),y:min(ms.y,me.y),width:abs(me.x-ms.x),height:abs(me.y-ms.y))
-                    var hits=Set<String>()
-                    for(_,n)in doc.nodes{let sp=vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:CGSize(width:0,height:0)); if r.contains(sp){hits.insert(n.id)}}
-                    vm.selectedIds=hits; vm.selectedId=hits.count==1 ? hits.first:nil
-                }
-                vm.marqueeStart=nil;vm.marqueeEnd=nil;vm.isMarqueeActive=false
-            }
-    }
+
 
     // ── Draw a connection ─────────────────────────────────
     private func drawEdge(ctx:GraphicsContext,sz:CGSize,from:CGPoint,to:CGPoint,
