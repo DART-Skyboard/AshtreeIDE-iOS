@@ -25,14 +25,8 @@ public enum MashNodeType: String, Codable, CaseIterable {
     case out3D      = "out_3d"      // 3D scene / WebGL output
     case inputForm  = "input_form"  // User input form node
     case outputForm = "output_form" // Output display form node
-    case returnNode = "return"      // Return/result node        // URL link node
-    // ASH language coding nodes
-    case ashCode    = "ash_code"    // ASH syntax block
-    case ashInput   = "ash_input"   // Input form / stdin
-    case ashOutput  = "ash_output"  // Output form / stdout terminal
-    case ash2D      = "ash_2d"      // 2D canvas output (HTML/SVG/vector)
-    case ash3D      = "ash_3d"      // 3D scene output (WebGL/Three.js/SceneKit)
-    case ashReturn  = "ash_return"  // Return / response value node        // Hyperlink node
+    case returnNode = "return"      // Return/result node
+
 
     public var defaultRadius: CGFloat {
         switch self {
