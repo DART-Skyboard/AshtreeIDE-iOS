@@ -778,8 +778,10 @@ struct CanvasPanBridge: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         // Add pan to superview (the full canvas) on first layout
-        guard let superview = uiView.superview,
-              !superview.gestureRecognizers.map({ $0 is UIPanGestureRecognizer }).contains(true) else { return }
+        guard let superview = uiView.superview else { return }
+        // Only add once — check if pan already attached
+        let alreadyHasPan = superview.gestureRecognizers?.contains(where: { $0 is UIPanGestureRecognizer }) ?? false
+        guard !alreadyHasPan else { return }
         let pan = UIPanGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handlePan(_:)))
         pan.maximumNumberOfTouches = 1
