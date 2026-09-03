@@ -770,9 +770,55 @@ struct MashCanvas: View {
         GeometryReader { geo in
             let sz = geo.size
             ZStack(alignment:.topLeading) {
-                // Background
+                // Background — pan gesture lives here so it only fires on empty canvas
                 (theme.canvasTransparent ? Color.clear : Color(hex:theme.canvasBackground))
                     .ignoresSafeArea()
+                    .gesture(
+                        DragGesture(minimumDistance:1, coordinateSpace:.local)
+                            .onChanged { val in
+                                guard !vm.isDraggingNode else { return }
+                                if vm.tool == .marquee {
+                                    if vm.marqueeStart == nil {
+                                        vm.marqueeStart    = val.startLocation
+                                        vm.isMarqueeActive = true
+                                    }
+                                    vm.marqueeEnd = val.location
+                                } else {
+                                    let dx = val.translation.width  - vm.lastPanTranslation.x
+                                    let dy = val.translation.height - vm.lastPanTranslation.y
+                                    vm.offset = CGPoint(
+                                        x: vm.offset.x + dx / vm.scale,
+                                        y: vm.offset.y + dy / vm.scale)
+                                    vm.lastPanTranslation = CGPoint(
+                                        x: val.translation.width,
+                                        y: val.translation.height)
+                                }
+                            }
+                            .onEnded { _ in
+                                vm.lastPanTranslation = .zero
+                                if vm.isMarqueeActive,
+                                   let ms = vm.marqueeStart,
+                                   let me = vm.marqueeEnd {
+                                    let sz2 = geo.size
+                                    let rect = CGRect(
+                                        x: Swift.min(ms.x,me.x),
+                                        y: Swift.min(ms.y,me.y),
+                                        width:  abs(me.x-ms.x),
+                                        height: abs(me.y-ms.y))
+                                    var hits = Set<String>()
+                                    for (_,n) in doc.nodes {
+                                        let sp = vm.worldToScreen(
+                                            CGPoint(x:n.x,y:n.y), sz:sz2)
+                                        if rect.contains(sp) { hits.insert(n.id) }
+                                    }
+                                    vm.selectedIds = hits
+                                    vm.selectedId  = hits.count == 1 ? hits.first : nil
+                                }
+                                vm.marqueeStart    = nil
+                                vm.marqueeEnd      = nil
+                                vm.isMarqueeActive = false
+                            }
+                    )
                 // Dot grid
                 if !theme.canvasTransparent {
                     Canvas { ctx, size in
