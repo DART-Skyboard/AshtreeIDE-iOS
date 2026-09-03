@@ -867,10 +867,10 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                // Pan + marquee: simultaneousGesture fires alongside node drags.
-                // isDraggingNode blocks pan while a node drag is active.
+                .coordinateSpace(name: "canvas")
+                // Pan + marquee using named coord space — separate from node drag (.global)
                 .simultaneousGesture(
-                    DragGesture(minimumDistance:6, coordinateSpace:.local)
+                    DragGesture(minimumDistance:6, coordinateSpace:.named("canvas"))
                         .onChanged { val in
                             guard !vm.isDraggingNode else { return }
                             if vm.tool == .marquee {
