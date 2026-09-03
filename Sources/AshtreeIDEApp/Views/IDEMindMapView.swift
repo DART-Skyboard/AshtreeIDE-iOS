@@ -851,9 +851,17 @@ struct MashCanvas: View {
                         .scaleEffect(vm.scale)
                         .position(sp)
                         .gesture(nodeDrag(n,sz:sz))
-                        .onTapGesture{ vm.handleNodeTap(n.id,doc:doc) }
-                        .onLongPressGesture(minimumDuration:0.4){
-                            vm.selectedId=n.id; vm.contextNodeId=n.id; vm.showContextMenu=true
+                        .onTapGesture(count:2) {
+                            vm.selectedId     = n.id
+                            vm.editorNodeId   = n.id
+                            vm.showNodeEditor = true
+                            vm.showContextMenu = false
+                        }
+                        .onTapGesture(count:1) { vm.handleNodeTap(n.id, doc:doc) }
+                        .onLongPressGesture(minimumDuration:0.4) {
+                            vm.selectedId    = n.id
+                            vm.contextNodeId = n.id
+                            vm.showContextMenu = true
                         }
                     }
                 }
@@ -1656,24 +1664,41 @@ struct MashExportSheet: View {
             }
         }
 
-        // Draw nodes
+        // Draw nodes (with attached images)
         for (_, n) in doc.nodes {
             let fill   = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
             let border = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
-            let text   = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
+            let textC  = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
             let nodeW  = n.width
-            let nodeH: CGFloat = n.type == .root ? 50 : 36
+            // Extra height if node has an attached image
+            let hasImg = n.imageData != nil
+            let imgH: CGFloat  = hasImg ? 80 : 0
+            let textH: CGFloat = n.type == .root ? 50 : 36
+            let nodeH  = textH + imgH
             let rect   = CGRect(x:cx+n.x-nodeW/2, y:cy+n.y-nodeH/2, width:nodeW, height:nodeH)
             let path   = UIBezierPath(roundedRect:rect, cornerRadius:10)
             fill.setFill(); path.fill()
             border.setStroke(); path.lineWidth = 2; path.stroke()
+            // Draw image thumbnail at top of node
+            if let imgData = n.imageData, let uiImg = UIImage(data:imgData) {
+                let imgRect = CGRect(x:rect.minX+4, y:rect.minY+4, width:nodeW-8, height:imgH-8)
+                // Clip to rounded rect for the image area
+                ctx.saveGState()
+                UIBezierPath(roundedRect:imgRect, cornerRadius:7).addClip()
+                uiImg.draw(in:imgRect)
+                ctx.restoreGState()
+            }
+            // Draw label below image (or centered if no image)
             let attrs: [NSAttributedString.Key:Any] = [
-                .font: n.bold ? UIFont.boldSystemFont(ofSize:n.fontSize ?? 12) : UIFont.systemFont(ofSize:n.fontSize ?? 10),
-                .foregroundColor: text
+                .font: n.bold
+                    ? UIFont.boldSystemFont(ofSize:n.fontSize ?? 12)
+                    : UIFont.systemFont(ofSize:n.fontSize ?? 10),
+                .foregroundColor: textC
             ]
-            let str = NSAttributedString(string:n.text, attributes:attrs)
+            let str     = NSAttributedString(string:n.text, attributes:attrs)
             let strSize = str.size()
-            str.draw(at:CGPoint(x:rect.midX-strSize.width/2, y:rect.midY-strSize.height/2))
+            let textY   = rect.minY + imgH + (textH - strSize.height) / 2
+            str.draw(at:CGPoint(x:rect.midX - strSize.width/2, y:textY))
         }
 
         let img = UIGraphicsGetImageFromCurrentImageContext()
