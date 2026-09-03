@@ -34,6 +34,9 @@ class MashCanvasVM: ObservableObject {
     // Context menu
     @Published var contextNodeId:   String? = nil
     @Published var showContextMenu: Bool = false
+    // Node editor — drive directly from VM so onChange isn't needed
+    @Published var showNodeEditor:  Bool = false
+    @Published var editorNodeId:    String? = nil
     // Connection selection + editing
     @Published var selectedConnId:  String? = nil
     @Published var showConnMenu:    Bool = false
@@ -615,14 +618,16 @@ struct MashCanvasView: View {
             NodeImagePickerSheet(nodeId: target.id, doc: doc)
                 .environmentObject(themeVM)
         }
-        .sheet(isPresented: $showNodeEditor) {
-            if let id=vm.selectedId, let n=doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n,doc:doc,isPresented:$showNodeEditor)
+        // Node editor — driven by vm.showNodeEditor (set from context menu or double-tap)
+        .sheet(isPresented: Binding(
+            get: { vm.showNodeEditor },
+            set: { vm.showNodeEditor = $0 }
+        )) {
+            if let id = vm.editorNodeId ?? vm.selectedId, let n = doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n, doc:doc,
+                    onDismiss: { vm.showNodeEditor = false })
                     .environmentObject(themeVM)
             }
-        }
-        .onChange(of: vm.contextNodeId) { id in
-            if id != nil && vm.showContextMenu == false { showNodeEditor = true }
         }
     }
 
@@ -1024,7 +1029,11 @@ struct MashContextMenu: View {
     var node:MashNodeData? { doc.nodes[nodeId] }
     var body: some View {
         VStack(spacing:0) {
-            row("Edit Node",     "pencil")        { vm.showContextMenu=false; vm.selectedId=nodeId }
+            row("Edit Node",     "pencil")        {
+                vm.showContextMenu = false
+                vm.editorNodeId    = nodeId
+                vm.showNodeEditor  = true
+            }
             div()
             row("Add Child",     "plus.circle")   { vm.addChildToSelected(doc:doc); vm.showContextMenu=false }
             div()
@@ -1179,7 +1188,7 @@ struct MashNodeView: View {
 struct MashNodeEditorSheet: View {
     let nodeData:   MashNodeData
     let doc:        MashDocument
-    @Binding var isPresented: Bool
+    let onDismiss:  () -> Void
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @StateObject private var store = MashStore.shared
 
@@ -1191,15 +1200,36 @@ struct MashNodeEditorSheet: View {
     @State private var type:   MashNodeType = .note
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
+    // FocusState MUST be at this level, not inside NavigationView
     @FocusState private var labelFocused: Bool
 
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color(hex:"#0d1117").ignoresSafeArea()
+        // Plain VStack — no NavigationView.
+        // NavigationView breaks @FocusState in sheets on iOS 16+.
+        ZStack {
+            Color(hex:"#0d1117").ignoresSafeArea()
+            VStack(spacing:0) {
+                // Custom navigation bar
+                HStack {
+                    Button("Cancel") { onDismiss() }
+                        .font(.system(size:13,design:.monospaced))
+                        .foregroundColor(themeVM.dim)
+                    Spacer()
+                    Text("Edit Node")
+                        .font(.system(size:13,weight:.semibold,design:.monospaced))
+                        .foregroundColor(themeVM.text)
+                    Spacer()
+                    Button("Save") { saveNode(); onDismiss() }
+                        .font(.system(size:13,weight:.semibold,design:.monospaced))
+                        .foregroundColor(themeVM.accent)
+                }
+                .padding(.horizontal,18).padding(.vertical,14)
+                .background(Color(hex:"#161b22"))
+                .overlay(Divider().background(Color(hex:"#21262d")), alignment:.bottom)
+
                 ScrollView {
                     VStack(alignment:.leading, spacing:16) {
-                        // Node type
+                        // Node type picker
                         ScrollView(.horizontal, showsIndicators:false) {
                             HStack(spacing:6) {
                                 ForEach(MashNodeType.allCases, id:\.self) { t in
@@ -1210,41 +1240,45 @@ struct MashNodeEditorSheet: View {
                                             .padding(.horizontal,10).padding(.vertical,5)
                                             .background(type==t ? themeVM.accent : Color(hex:"#161b22"))
                                             .cornerRadius(6)
-                                    }
-                                    .buttonStyle(.plain)
+                                    }.buttonStyle(.plain)
                                 }
                             }
                         }
 
-                        // Text
-                        // Label field with auto-focus
-                        VStack(alignment:.leading, spacing:4) {
-                            Text("LABEL".uppercased())
+                        // ── LABEL — primary editable field ──────────────
+                        VStack(alignment:.leading, spacing:6) {
+                            Text("LABEL")
                                 .font(.system(size:7,weight:.bold,design:.monospaced))
                                 .foregroundColor(themeVM.dim).kerning(1.5)
                             TextField("Node label", text: $text, axis: .vertical)
-                                .font(.system(size:13))
+                                .font(.system(size:15,design:.monospaced))
                                 .foregroundColor(themeVM.accent)
                                 .focused($labelFocused)
-                                .padding(10).background(Color(hex:"#161b22")).cornerRadius(8)
-                                .overlay(RoundedRectangle(cornerRadius:8)
-                                    .stroke(labelFocused ? themeVM.accent : Color(hex:"#21262d"), lineWidth:0.5))
+                                .textFieldStyle(.plain)
+                                .padding(12)
+                                .background(Color(hex:"#0d1117"))
+                                .cornerRadius(10)
+                                .overlay(RoundedRectangle(cornerRadius:10)
+                                    .stroke(labelFocused
+                                            ? themeVM.accent
+                                            : Color(hex:"#30363d"),
+                                            lineWidth: labelFocused ? 1.5 : 0.5))
+                                .submitLabel(.done)
                         }
-                        field("Notes / Detail", binding: $detail, mono: false)
-                        field("Hyperlink URL", binding: $url, mono: true)
 
-                        // Style
+                        field("Notes / Detail", binding: $detail, mono: false)
+                        field("Hyperlink URL",  binding: $url,    mono: true)
+
                         HStack(spacing:12) {
-                            Toggle("Bold", isOn: $bold).tint(themeVM.accent)
+                            Toggle("Bold",   isOn: $bold).tint(themeVM.accent)
                             Toggle("Italic", isOn: $italic).tint(themeVM.accent)
                         }
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
 
-                        // Image
                         Button { showImagePicker = true } label: {
                             Label(pickedImage != nil ? "Change Image" : "Attach Image",
-                                  systemImage: "photo.badge.plus")
+                                  systemImage:"photo.badge.plus")
                                 .font(.system(size:11,design:.monospaced))
                                 .foregroundColor(themeVM.accent)
                                 .frame(maxWidth:.infinity).padding(.vertical,10)
@@ -1252,36 +1286,24 @@ struct MashNodeEditorSheet: View {
                         }
                         if let img = pickedImage {
                             Image(uiImage:img).resizable().scaledToFit()
-                                .frame(maxHeight:120).cornerRadius(8)
+                                .frame(maxHeight:140).cornerRadius(8)
                         }
                     }
                     .padding(16)
                 }
             }
-            .navigationTitle("Edit Node")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement:.navigationBarLeading) {
-                    Button("Cancel") { isPresented = false }.foregroundColor(themeVM.dim)
-                }
-                ToolbarItem(placement:.navigationBarTrailing) {
-                    Button("Save") { saveNode(); isPresented = false }
-                        .font(.system(size:11,weight:.semibold,design:.monospaced))
-                        .foregroundColor(themeVM.accent)
-                }
-            }
-            .onAppear {
-                text   = nodeData.text
-                detail = nodeData.detail
-                url    = nodeData.url
-                bold   = nodeData.bold
-                italic = nodeData.italic
-                type   = nodeData.type
-                if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
-                // Auto-focus label field after sheet appears
-                DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
-                    labelFocused = true
-                }
+        }
+        .onAppear {
+            text   = nodeData.text
+            detail = nodeData.detail
+            url    = nodeData.url
+            bold   = nodeData.bold
+            italic = nodeData.italic
+            type   = nodeData.type
+            if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
+            // Focus after the sheet animation finishes (~0.6s on iOS)
+            DispatchQueue.main.asyncAfter(deadline:.now()+0.65) {
+                labelFocused = true
             }
         }
         .sheet(isPresented: $showImagePicker) {
