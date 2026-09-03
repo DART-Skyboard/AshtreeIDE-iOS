@@ -867,30 +867,44 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                // Marquee selection — SwiftUI gesture, UIKit pan handles actual panning
+                // Pan + marquee: simultaneousGesture fires alongside node drags.
+                // isDraggingNode blocks pan while a node drag is active.
                 .simultaneousGesture(
-                    DragGesture(minimumDistance:8, coordinateSpace:.local)
+                    DragGesture(minimumDistance:6, coordinateSpace:.local)
                         .onChanged { val in
-                            guard !vm.isDraggingNode, vm.tool == .marquee else { return }
-                            if vm.marqueeStart == nil {
-                                vm.marqueeStart = val.startLocation; vm.isMarqueeActive = true
+                            guard !vm.isDraggingNode else { return }
+                            if vm.tool == .marquee {
+                                if vm.marqueeStart == nil {
+                                    vm.marqueeStart    = val.startLocation
+                                    vm.isMarqueeActive = true
+                                }
+                                vm.marqueeEnd = val.location
+                            } else {
+                                let dx = val.translation.width  - vm.lastPanTranslation.x
+                                let dy = val.translation.height - vm.lastPanTranslation.y
+                                vm.offset = CGPoint(
+                                    x: vm.offset.x + dx / vm.scale,
+                                    y: vm.offset.y + dy / vm.scale)
+                                vm.lastPanTranslation = CGPoint(
+                                    x: val.translation.width,
+                                    y: val.translation.height)
                             }
-                            vm.marqueeEnd = val.location
                         }
                         .onEnded { _ in
+                            vm.lastPanTranslation = .zero
                             if vm.isMarqueeActive,
-                               let ms = vm.marqueeStart, let me = vm.marqueeEnd {
-                                let rect = CGRect(x:Swift.min(ms.x,me.x),
-                                                  y:Swift.min(ms.y,me.y),
-                                                  width:abs(me.x-ms.x),
-                                                  height:abs(me.y-ms.y))
+                               let ms = vm.marqueeStart,
+                               let me = vm.marqueeEnd {
+                                let rect = CGRect(
+                                    x: Swift.min(ms.x,me.x), y: Swift.min(ms.y,me.y),
+                                    width: abs(me.x-ms.x),   height: abs(me.y-ms.y))
                                 var hits = Set<String>()
                                 for (_,n) in doc.nodes {
                                     let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                                     if rect.contains(sp) { hits.insert(n.id) }
                                 }
-                                vm.selectedIds=hits
-                                vm.selectedId=hits.count==1 ? hits.first:nil
+                                vm.selectedIds = hits
+                                vm.selectedId  = hits.count == 1 ? hits.first : nil
                             }
                             vm.marqueeStart=nil; vm.marqueeEnd=nil; vm.isMarqueeActive=false
                         }
@@ -1681,50 +1695,41 @@ struct MashExportSheet: View {
             let bordC = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
             let txtC  = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
 
-            // Fixed node width in export canvas, capped scale so nodes aren't tiny
             let nw: CGFloat   = Swift.max(160, n.width) * Swift.min(s, 1.2)
             let lblH: CGFloat = n.type == .root ? 52 : 38
 
-            // Compute image box height from true image aspect ratio
+            // Image box: height derived from true aspect ratio
             var imgH: CGFloat  = 0
             var exportImg: UIImage? = nil
             if let dat = n.imageData, let uiImg = UIImage(data: dat) {
                 exportImg = uiImg
-                // Width of the image area = nw minus margins
                 let boxW   = nw - 10
                 let aspect = uiImg.size.width / Swift.max(1, uiImg.size.height)
-                // Height = width / aspect, capped so node doesn't get too tall
-                imgH = Swift.min(boxW / aspect, nw * 0.75)
+                imgH       = Swift.min(boxW / aspect, nw * 0.75)
             }
 
             let nh   = lblH + imgH
             let rect = CGRect(x: px(n.x)-nw/2, y: py(n.y)-nh/2, width: nw, height: nh)
 
-            // Node background + border
             let nodePath = UIBezierPath(roundedRect: rect, cornerRadius: 12)
             fillC.setFill();   nodePath.fill()
             bordC.setStroke(); nodePath.lineWidth = 2; nodePath.stroke()
 
-            // Image thumbnail — aspect-FIT (letterbox), never stretch
+            // Aspect-fit image (never stretch)
             if let uiImg = exportImg {
-                let m: CGFloat = 5
-                let box = CGRect(x: rect.minX+m, y: rect.minY+m,
-                                 width: nw-m*2, height: imgH-m)
-                // Aspect-fit inside box
-                let imgAspect = uiImg.size.width / Swift.max(1, uiImg.size.height)
-                let boxAspect = box.width / Swift.max(1, box.height)
+                let m: CGFloat  = 5
+                let box         = CGRect(x: rect.minX+m, y: rect.minY+m,
+                                         width: nw-m*2, height: imgH-m)
+                let imgAspect   = uiImg.size.width / Swift.max(1, uiImg.size.height)
+                let boxAspect   = box.width / Swift.max(1, box.height)
                 let drawRect: CGRect
                 if imgAspect > boxAspect {
-                    // Image wider than box — fit width, letterbox top/bottom
                     let h = box.width / imgAspect
-                    drawRect = CGRect(x: box.minX,
-                                      y: box.minY + (box.height-h)/2,
+                    drawRect = CGRect(x: box.minX, y: box.minY+(box.height-h)/2,
                                       width: box.width, height: h)
                 } else {
-                    // Image taller than box — fit height, letterbox left/right
                     let w = box.height * imgAspect
-                    drawRect = CGRect(x: box.minX + (box.width-w)/2,
-                                      y: box.minY,
+                    drawRect = CGRect(x: box.minX+(box.width-w)/2, y: box.minY,
                                       width: w, height: box.height)
                 }
                 ctx.saveGState()
@@ -1733,18 +1738,16 @@ struct MashExportSheet: View {
                 ctx.restoreGState()
             }
 
-            // Label text below image
+            // Label
             let fs  = CGFloat(n.type == .root ? 16 : 13)
-            let fnt = n.bold ? UIFont.boldSystemFont(ofSize: fs)
-                             : UIFont.systemFont(ofSize: fs)
-            let atr: [NSAttributedString.Key: Any] = [.font: fnt, .foregroundColor: txtC]
-            let str = NSAttributedString(string: n.text, attributes: atr)
+            let fnt = n.bold ? UIFont.boldSystemFont(ofSize:fs) : UIFont.systemFont(ofSize:fs)
+            let atr: [NSAttributedString.Key:Any] = [.font:fnt, .foregroundColor:txtC]
+            let str = NSAttributedString(string:n.text, attributes:atr)
             let ssz = str.size()
-            let ty  = rect.minY + imgH + (lblH - ssz.height) / 2
-            str.draw(at: CGPoint(x: rect.midX - ssz.width/2,
-                                 y: Swift.max(ty, rect.minY + imgH + 4)))
+            let ty  = rect.minY + imgH + (lblH-ssz.height)/2
+            str.draw(at:CGPoint(x:rect.midX-ssz.width/2,
+                                y:Swift.max(ty, rect.minY+imgH+4)))
         }
-
         let img = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
 
