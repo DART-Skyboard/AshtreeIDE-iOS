@@ -772,9 +772,11 @@ struct CanvasPanBridge: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let v = UIView()
         v.backgroundColor = .clear
+        v.isUserInteractionEnabled = true
         let pan = UIPanGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handlePan(_:)))
         pan.maximumNumberOfTouches = 1   // single-finger pan only; pinch uses 2
+        pan.cancelsTouchesInView = false  // don't block SwiftUI node touches
         pan.delegate = context.coordinator
         v.addGestureRecognizer(pan)
         return v
@@ -787,31 +789,36 @@ struct CanvasPanBridge: UIViewRepresentable {
         init(vm: MashCanvasVM) { self.vm = vm }
 
         @objc func handlePan(_ gr: UIPanGestureRecognizer) {
-            // Never pan if a node drag is in progress
-            guard !vm.isDraggingNode else {
-                gr.setTranslation(.zero, in: gr.view)
-                return
-            }
-            let t = gr.translation(in: gr.view)
             switch gr.state {
-            case .changed:
-                if vm.tool == .marquee {
-                    // handled by SwiftUI gesture
-                } else {
-                    DispatchQueue.main.async {
-                        self.vm.offset = CGPoint(
-                            x: self.vm.offset.x + t.x / self.vm.scale,
-                            y: self.vm.offset.y + t.y / self.vm.scale)
-                    }
-                    gr.setTranslation(.zero, in: gr.view)  // reset each frame
+            case .began:
+                // Cancel immediately if node drag starts
+                if vm.isDraggingNode || vm.tool == .marquee {
+                    gr.state = .cancelled
+                    return
                 }
+            case .changed:
+                if vm.isDraggingNode || vm.tool == .marquee {
+                    gr.setTranslation(.zero, in: gr.view)
+                    return
+                }
+                let t = gr.translation(in: gr.view)
+                DispatchQueue.main.async {
+                    self.vm.offset = CGPoint(
+                        x: self.vm.offset.x + t.x / self.vm.scale,
+                        y: self.vm.offset.y + t.y / self.vm.scale)
+                }
+                gr.setTranslation(.zero, in: gr.view)
             case .ended, .cancelled, .failed:
-                vm.lastPanTranslation = .zero
+                break
             default: break
             }
         }
 
-        // Allow simultaneous recognition with SwiftUI gestures
+        // Don't begin pan when marquee tool is active — let SwiftUI handle it
+        func gestureRecognizerShouldBegin(_ gr: UIGestureRecognizer) -> Bool {
+            return !vm.isDraggingNode && vm.tool != .marquee
+        }
+        // Allow simultaneous recognition with pinch and other gestures
         func gestureRecognizer(_ gr: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
             return true
@@ -994,7 +1001,7 @@ struct MashCanvas: View {
             // UIKit pan bridge — covers full canvas, bypasses SwiftUI gesture arbitration
             .overlay(
                 CanvasPanBridge(vm: vm)
-                    .allowsHitTesting(true)
+                    .allowsHitTesting(false)  // SwiftUI ignores; UIKit pan still fires
                     .frame(width:sz.width, height:sz.height)
             )
             // Pinch to zoom — 2-finger, doesn't conflict with 1-finger pan
@@ -1739,44 +1746,54 @@ struct MashExportSheet: View {
         }
         ctx.setLineDash(phase:0,lengths:[])
 
-        // Nodes
+        // Nodes — use fixed export sizes, not ps() scaled, to avoid distortion
         for n in allNodes {
-            let fillC  = UIColor(Color(hex: n.fillColor  ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
+            let fillC  = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
             let bordC  = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
-            let txtC   = UIColor(Color(hex: n.textColor  ?? (n.type == .root ? theme.rootText   : theme.mainText)))
-            let nw     = ps(n.width)
-            let lblH   = n.type == .root ? ps(44) : ps(30)
-            let hasImg = n.imageData != nil
-            let imgH   = hasImg ? ps(68) : CGFloat(0)
-            let nh     = lblH + imgH
-            let rect   = CGRect(x:px(n.x)-nw/2, y:py(n.y)-nh/2, width:nw, height:nh)
-            let path   = UIBezierPath(roundedRect:rect, cornerRadius:ps(10))
-            fillC.setFill(); path.fill()
-            bordC.setStroke(); path.lineWidth=max(1,s*0.7); path.stroke()
+            let txtC   = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
 
-            if hasImg, let dat=n.imageData, let img=UIImage(data:dat) {
-                let m=ps(3)
-                let box=CGRect(x:rect.minX+m, y:rect.minY+m, width:nw-m*2, height:imgH-m*2)
-                // aspect-fit inside box
-                let ia=img.size.width/img.size.height, ba=box.width/box.height
-                let dr: CGRect = ia>ba
-                    ? CGRect(x:box.minX, y:box.minY+(box.height-box.width/ia)/2,
-                             width:box.width, height:box.width/ia)
-                    : CGRect(x:box.minX+(box.width-box.height*ia)/2, y:box.minY,
-                             width:box.height*ia, height:box.height)
+            // Fixed pixel sizes for export — world coords only affect position
+            let nw:     CGFloat = max(120, n.width) * Swift.min(s, 1.4)
+            let lblH:   CGFloat = n.type == .root ? 52 : 36
+            let hasImg          = n.imageData != nil
+            let imgH:   CGFloat = hasImg ? 90 : 0
+            let nh              = lblH + imgH
+            let rect = CGRect(x: px(n.x)-nw/2, y: py(n.y)-nh/2, width: nw, height: nh)
+
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: 12)
+            fillC.setFill();   path.fill()
+            bordC.setStroke(); path.lineWidth = 2; path.stroke()
+
+            // Image thumbnail: aspect-fit in top portion of node
+            if hasImg, let dat = n.imageData, let uiImg = UIImage(data: dat) {
+                let m: CGFloat  = 5
+                let box = CGRect(x: rect.minX+m, y: rect.minY+m,
+                                 width: nw-m*2, height: imgH-m*2)
+                let ia = uiImg.size.width / uiImg.size.height
+                let ba = box.width / box.height
+                let dr: CGRect = ia > ba
+                    ? CGRect(x: box.minX,
+                             y: box.minY + (box.height - box.width/ia)/2,
+                             width: box.width, height: box.width/ia)
+                    : CGRect(x: box.minX + (box.width - box.height*ia)/2,
+                             y: box.minY,
+                             width: box.height*ia, height: box.height)
                 ctx.saveGState()
-                UIBezierPath(roundedRect:box,cornerRadius:ps(5)).addClip()
-                img.draw(in:dr)
+                UIBezierPath(roundedRect: box, cornerRadius: 8).addClip()
+                uiImg.draw(in: dr)
                 ctx.restoreGState()
             }
 
-            let fs  = max(8, n.fontSize.map{ps($0)} ?? (n.type == .root ? ps(13) : ps(10)))
-            let fnt = n.bold ? UIFont.boldSystemFont(ofSize:fs) : UIFont.systemFont(ofSize:fs)
-            let atr: [NSAttributedString.Key:Any] = [.font:fnt, .foregroundColor:txtC]
-            let str = NSAttributedString(string:n.text, attributes:atr)
+            // Label text
+            let fs  = CGFloat(n.type == .root ? 16 : 13)
+            let fnt = n.bold ? UIFont.boldSystemFont(ofSize: fs)
+                             : UIFont.systemFont(ofSize: fs)
+            let atr: [NSAttributedString.Key:Any] = [.font: fnt, .foregroundColor: txtC]
+            let str = NSAttributedString(string: n.text, attributes: atr)
             let ssz = str.size()
-            let ty  = rect.minY + imgH + (lblH-ssz.height)/2
-            str.draw(at:CGPoint(x:rect.midX-ssz.width/2, y:max(ty, rect.minY+imgH+2)))
+            let ty  = rect.minY + imgH + (lblH - ssz.height) / 2
+            str.draw(at: CGPoint(x: rect.midX - ssz.width/2,
+                                 y: Swift.max(ty, rect.minY + imgH + 4)))
         }
 
         let img = UIGraphicsGetImageFromCurrentImageContext()
