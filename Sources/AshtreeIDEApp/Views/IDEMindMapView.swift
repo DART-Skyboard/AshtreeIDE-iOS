@@ -964,7 +964,7 @@ struct MashCanvas: View {
 
     // ── Node drag — start from world pos to avoid drift ──
     private func nodeDrag(_ n:MashNodeData, sz:CGSize) -> some Gesture {
-        DragGesture(minimumDistance:5, coordinateSpace:.local)
+        DragGesture(minimumDistance:5, coordinateSpace:.global)
             .onChanged { val in
                 guard vm.tool == .select else { return }
                 if !vm.isDraggingNode {
@@ -982,7 +982,6 @@ struct MashCanvas: View {
             .onEnded { _ in
                 vm.isDraggingNode = false
                 vm.draggingId     = nil
-                // Snap back if using a strict template layout
                 let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
                 if strictLayouts.contains(doc.layout) {
                     var d = doc
@@ -1698,15 +1697,9 @@ struct MashExportSheet: View {
             let nw: CGFloat   = Swift.max(160, n.width) * Swift.min(s, 1.2)
             let lblH: CGFloat = n.type == .root ? 52 : 38
 
-            // Image box: height derived from true aspect ratio
-            var imgH: CGFloat  = 0
-            var exportImg: UIImage? = nil
-            if let dat = n.imageData, let uiImg = UIImage(data: dat) {
-                exportImg = uiImg
-                let boxW   = nw - 10
-                let aspect = uiImg.size.width / Swift.max(1, uiImg.size.height)
-                imgH       = Swift.min(boxW / aspect, nw * 0.75)
-            }
+            // Image: fixed 120pt tall box, aspect-fit inside it
+            let hasImg = n.imageData != nil
+            let imgH: CGFloat = hasImg ? 120 : 0
 
             let nh   = lblH + imgH
             let rect = CGRect(x: px(n.x)-nw/2, y: py(n.y)-nh/2, width: nw, height: nh)
@@ -1715,22 +1708,34 @@ struct MashExportSheet: View {
             fillC.setFill();   nodePath.fill()
             bordC.setStroke(); nodePath.lineWidth = 2; nodePath.stroke()
 
-            // Aspect-fit image (never stretch)
-            if let uiImg = exportImg {
-                let m: CGFloat  = 5
-                let box         = CGRect(x: rect.minX+m, y: rect.minY+m,
-                                         width: nw-m*2, height: imgH-m)
-                let imgAspect   = uiImg.size.width / Swift.max(1, uiImg.size.height)
-                let boxAspect   = box.width / Swift.max(1, box.height)
-                let drawRect: CGRect
-                if imgAspect > boxAspect {
-                    let h = box.width / imgAspect
-                    drawRect = CGRect(x: box.minX, y: box.minY+(box.height-h)/2,
-                                      width: box.width, height: h)
+            if hasImg, let dat = n.imageData, let raw = UIImage(data: dat) {
+                // Normalize orientation so portrait images aren't rotated
+                let uiImg: UIImage
+                if raw.imageOrientation == .up {
+                    uiImg = raw
                 } else {
-                    let w = box.height * imgAspect
-                    drawRect = CGRect(x: box.minX+(box.width-w)/2, y: box.minY,
-                                      width: w, height: box.height)
+                    UIGraphicsBeginImageContextWithOptions(raw.size, false, raw.scale)
+                    raw.draw(in: CGRect(origin:.zero, size:raw.size))
+                    uiImg = UIGraphicsGetImageFromCurrentImageContext() ?? raw
+                    UIGraphicsEndImageContext()
+                }
+                let m: CGFloat = 5
+                let box = CGRect(x: rect.minX+m, y: rect.minY+m,
+                                 width: nw-m*2, height: imgH-m*2)
+                // True aspect-fit: compare ratios, never stretch
+                let iw = Swift.max(1, uiImg.size.width)
+                let ih = Swift.max(1, uiImg.size.height)
+                let drawRect: CGRect
+                if iw/ih > box.width/box.height {
+                    // Wider than box → fit width
+                    let h = box.width * ih / iw
+                    drawRect = CGRect(x:box.minX, y:box.minY+(box.height-h)/2,
+                                      width:box.width, height:h)
+                } else {
+                    // Taller than box → fit height
+                    let w = box.height * iw / ih
+                    drawRect = CGRect(x:box.minX+(box.width-w)/2, y:box.minY,
+                                      width:w, height:box.height)
                 }
                 ctx.saveGState()
                 UIBezierPath(roundedRect: box, cornerRadius: 8).addClip()
