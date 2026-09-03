@@ -1741,9 +1741,9 @@ struct MashExportSheet: View {
 
         // Nodes
         for n in allNodes {
-            let fillC  =UIColor(Color(hex:n.fillColor   ??(n.type == .root ? theme.rootFill   : theme.mainFill)))
-            let bordC  =UIColor(Color(hex:n.borderColor ??(n.type == .root ? theme.rootBorder : theme.mainBorder)))
-            let txtC   =UIColor(Color(hex:n.textColor   ??(n.type == .root ? theme.rootText   : theme.mainText)))
+            let fillC  = UIColor(Color(hex: n.fillColor  ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
+            let bordC  = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
+            let txtC   = UIColor(Color(hex: n.textColor  ?? (n.type == .root ? theme.rootText   : theme.mainText)))
             let nw     = ps(n.width)
             let lblH   = n.type == .root ? ps(44) : ps(30)
             let hasImg = n.imageData != nil
