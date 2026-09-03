@@ -823,7 +823,6 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                .simultaneousGesture(canvasPan(sz:sz))
 
                 // Connection context menu (tap near midpoint of a ref connection)
                 if vm.showConnMenu, let connId = vm.selectedConnId,
@@ -861,6 +860,18 @@ struct MashCanvas: View {
                 }
             }
             .frame(width:sz.width,height:sz.height)
+            // Pinch to zoom — on outer container so it works everywhere
+            .gesture(MagnificationGesture()
+                .onChanged { v in
+                    vm.scale = Swift.min(Swift.max(vm.baseScale * v, vm.minScale), vm.maxScale)
+                }
+                .onEnded { _ in vm.baseScale = vm.scale })
+            // Tap on empty canvas to deselect
+            .onTapGesture {
+                guard !vm.isDraggingNode else { return }
+                vm.selectedId = nil; vm.selectedIds = []
+                vm.showContextMenu = false; vm.showConnMenu = false; vm.selectedConnId = nil
+            }
         }
     }
 
