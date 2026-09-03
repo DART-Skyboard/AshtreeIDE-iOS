@@ -760,6 +760,65 @@ struct MashSideToolbar: View {
     }
 }
 
+// MARK: - UIKit Pan Gesture Bridge
+// SwiftUI gesture arbitration is unreliable when nodes have their own gestures.
+// This UIViewRepresentable injects a raw UIPanGestureRecognizer that always fires.
+
+struct CanvasPanBridge: UIViewRepresentable {
+    @ObservedObject var vm: MashCanvasVM
+
+    func makeCoordinator() -> Coordinator { Coordinator(vm: vm) }
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        v.backgroundColor = .clear
+        let pan = UIPanGestureRecognizer(target: context.coordinator,
+                                         action: #selector(Coordinator.handlePan(_:)))
+        pan.maximumNumberOfTouches = 1   // single-finger pan only; pinch uses 2
+        pan.delegate = context.coordinator
+        v.addGestureRecognizer(pan)
+        return v
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        let vm: MashCanvasVM
+        init(vm: MashCanvasVM) { self.vm = vm }
+
+        @objc func handlePan(_ gr: UIPanGestureRecognizer) {
+            // Never pan if a node drag is in progress
+            guard !vm.isDraggingNode else {
+                gr.setTranslation(.zero, in: gr.view)
+                return
+            }
+            let t = gr.translation(in: gr.view)
+            switch gr.state {
+            case .changed:
+                if vm.tool == .marquee {
+                    // handled by SwiftUI gesture
+                } else {
+                    DispatchQueue.main.async {
+                        self.vm.offset = CGPoint(
+                            x: self.vm.offset.x + t.x / self.vm.scale,
+                            y: self.vm.offset.y + t.y / self.vm.scale)
+                    }
+                    gr.setTranslation(.zero, in: gr.view)  // reset each frame
+                }
+            case .ended, .cancelled, .failed:
+                vm.lastPanTranslation = .zero
+            default: break
+            }
+        }
+
+        // Allow simultaneous recognition with SwiftUI gestures
+        func gestureRecognizer(_ gr: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            return true
+        }
+    }
+}
+
 // MARK: - Canvas Renderer
 
 struct MashCanvas: View {
@@ -950,7 +1009,13 @@ struct MashCanvas: View {
                 }
             }
             .frame(width:sz.width,height:sz.height)
-            // Pinch to zoom — on outer container so it works everywhere
+            // UIKit pan bridge — covers full canvas, bypasses SwiftUI gesture arbitration
+            .overlay(
+                CanvasPanBridge(vm: vm)
+                    .allowsHitTesting(true)
+                    .frame(width:sz.width, height:sz.height)
+            )
+            // Pinch to zoom — 2-finger, doesn't conflict with 1-finger pan
             .gesture(MagnificationGesture()
                 .onChanged { v in
                     vm.scale = Swift.min(Swift.max(vm.baseScale * v, vm.minScale), vm.maxScale)
