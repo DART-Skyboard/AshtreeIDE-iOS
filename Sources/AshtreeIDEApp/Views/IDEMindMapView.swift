@@ -772,17 +772,21 @@ struct CanvasPanBridge: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let v = UIView()
         v.backgroundColor = .clear
-        v.isUserInteractionEnabled = true
-        let pan = UIPanGestureRecognizer(target: context.coordinator,
-                                         action: #selector(Coordinator.handlePan(_:)))
-        pan.maximumNumberOfTouches = 1   // single-finger pan only; pinch uses 2
-        pan.cancelsTouchesInView = false  // don't block SwiftUI node touches
-        pan.delegate = context.coordinator
-        v.addGestureRecognizer(pan)
+        v.isUserInteractionEnabled = false  // this view itself doesn't intercept touches
         return v
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Add pan to superview (the full canvas) on first layout
+        guard let superview = uiView.superview,
+              !superview.gestureRecognizers.map({ $0 is UIPanGestureRecognizer }).contains(true) else { return }
+        let pan = UIPanGestureRecognizer(target: context.coordinator,
+                                         action: #selector(Coordinator.handlePan(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = false
+        pan.delegate = context.coordinator
+        superview.addGestureRecognizer(pan)
+    }
 
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let vm: MashCanvasVM
@@ -998,11 +1002,10 @@ struct MashCanvas: View {
                 }
             }
             .frame(width:sz.width,height:sz.height)
-            // UIKit pan bridge — covers full canvas, bypasses SwiftUI gesture arbitration
-            .overlay(
+            // UIKit pan bridge as background — UIKit layer receives touches
+            // but SwiftUI nodes stay on top and handle their own gestures
+            .background(
                 CanvasPanBridge(vm: vm)
-                    .allowsHitTesting(false)  // SwiftUI ignores; UIKit pan still fires
-                    .frame(width:sz.width, height:sz.height)
             )
             // Pinch to zoom — 2-finger, doesn't conflict with 1-finger pan
             .gesture(MagnificationGesture()
@@ -1746,49 +1749,48 @@ struct MashExportSheet: View {
         }
         ctx.setLineDash(phase:0,lengths:[])
 
-        // Nodes — use fixed export sizes, not ps() scaled, to avoid distortion
+        // Nodes
         for n in allNodes {
             let fillC  = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
             let bordC  = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
             let txtC   = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
 
-            // Fixed pixel sizes for export — world coords only affect position
-            let nw:     CGFloat = max(120, n.width) * Swift.min(s, 1.4)
-            let lblH:   CGFloat = n.type == .root ? 52 : 36
-            let hasImg          = n.imageData != nil
-            let imgH:   CGFloat = hasImg ? 90 : 0
-            let nh              = lblH + imgH
-            let rect = CGRect(x: px(n.x)-nw/2, y: py(n.y)-nh/2, width: nw, height: nh)
+            let nw: CGFloat = 180   // fixed export width — no scaling distortion
+            let lblH: CGFloat = n.type == .root ? 52 : 38
 
+            // Image: draw at true aspect ratio, max height 120
+            var imgH: CGFloat = 0
+            var exportImg: UIImage? = nil
+            if let dat = n.imageData, let uiImg = UIImage(data: dat) {
+                exportImg = uiImg
+                let aspect = uiImg.size.width / uiImg.size.height
+                // Box width = nw-10; height from aspect, capped at 120
+                imgH = Swift.min((nw-10) / aspect, 120)
+            }
+
+            let nh = lblH + imgH
+            let rect = CGRect(x: px(n.x)-nw/2, y: py(n.y)-nh/2, width: nw, height: nh)
             let path = UIBezierPath(roundedRect: rect, cornerRadius: 12)
             fillC.setFill();   path.fill()
             bordC.setStroke(); path.lineWidth = 2; path.stroke()
 
-            // Image thumbnail: aspect-fit in top portion of node
-            if hasImg, let dat = n.imageData, let uiImg = UIImage(data: dat) {
-                let m: CGFloat  = 5
-                let box = CGRect(x: rect.minX+m, y: rect.minY+m,
-                                 width: nw-m*2, height: imgH-m*2)
-                let ia = uiImg.size.width / uiImg.size.height
-                let ba = box.width / box.height
-                let dr: CGRect = ia > ba
-                    ? CGRect(x: box.minX,
-                             y: box.minY + (box.height - box.width/ia)/2,
-                             width: box.width, height: box.width/ia)
-                    : CGRect(x: box.minX + (box.width - box.height*ia)/2,
-                             y: box.minY,
-                             width: box.height*ia, height: box.height)
+            if let uiImg = exportImg {
+                // Draw at true aspect ratio — no stretch at all
+                let m: CGFloat = 5
+                let drawW = nw - m*2
+                let drawH = imgH - m
+                let drawRect = CGRect(x: rect.minX+m, y: rect.minY+m,
+                                      width: drawW, height: drawH)
                 ctx.saveGState()
-                UIBezierPath(roundedRect: box, cornerRadius: 8).addClip()
-                uiImg.draw(in: dr)
+                UIBezierPath(roundedRect: drawRect, cornerRadius: 8).addClip()
+                uiImg.draw(in: drawRect)   // image fills box at its own aspect
                 ctx.restoreGState()
             }
 
-            // Label text
             let fs  = CGFloat(n.type == .root ? 16 : 13)
             let fnt = n.bold ? UIFont.boldSystemFont(ofSize: fs)
                              : UIFont.systemFont(ofSize: fs)
-            let atr: [NSAttributedString.Key:Any] = [.font: fnt, .foregroundColor: txtC]
+            let atr: [NSAttributedString.Key: Any] = [.font: fnt, .foregroundColor: txtC]
             let str = NSAttributedString(string: n.text, attributes: atr)
             let ssz = str.size()
             let ty  = rect.minY + imgH + (lblH - ssz.height) / 2
