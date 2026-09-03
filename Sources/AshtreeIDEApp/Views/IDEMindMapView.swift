@@ -113,7 +113,7 @@ class MashCanvasVM: ObservableObject {
             // Re-parent children to grandparent (don't delete them)
             for childId in node.children {
                 d.nodes[childId]?.parentId = grandParentId
-                if !d.nodes[grandParentId]?.children.contains(childId) ?? false {
+                if !(d.nodes[grandParentId]?.children.contains(childId) ?? false) {
                     d.nodes[grandParentId]?.children.append(childId)
                 }
             }
