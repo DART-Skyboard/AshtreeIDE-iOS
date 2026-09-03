@@ -926,50 +926,32 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                // Pan as simultaneousGesture: fires alongside node gestures,
-                // blocked only when isDraggingNode is true
+                // Marquee selection — SwiftUI gesture, UIKit pan handles actual panning
                 .simultaneousGesture(
-                    DragGesture(minimumDistance:1, coordinateSpace:.local)
+                    DragGesture(minimumDistance:8, coordinateSpace:.local)
                         .onChanged { val in
-                            guard !vm.isDraggingNode else { return }
-                            if vm.tool == .marquee {
-                                if vm.marqueeStart == nil {
-                                    vm.marqueeStart    = val.startLocation
-                                    vm.isMarqueeActive = true
-                                }
-                                vm.marqueeEnd = val.location
-                            } else {
-                                let dx = val.translation.width  - vm.lastPanTranslation.x
-                                let dy = val.translation.height - vm.lastPanTranslation.y
-                                vm.offset = CGPoint(
-                                    x: vm.offset.x + dx / vm.scale,
-                                    y: vm.offset.y + dy / vm.scale)
-                                vm.lastPanTranslation = CGPoint(
-                                    x: val.translation.width,
-                                    y: val.translation.height)
+                            guard !vm.isDraggingNode, vm.tool == .marquee else { return }
+                            if vm.marqueeStart == nil {
+                                vm.marqueeStart = val.startLocation; vm.isMarqueeActive = true
                             }
+                            vm.marqueeEnd = val.location
                         }
                         .onEnded { _ in
-                            vm.lastPanTranslation = .zero
                             if vm.isMarqueeActive,
-                               let ms = vm.marqueeStart,
-                               let me = vm.marqueeEnd {
-                                let rect = CGRect(
-                                    x: Swift.min(ms.x, me.x),
-                                    y: Swift.min(ms.y, me.y),
-                                    width:  abs(me.x-ms.x),
-                                    height: abs(me.y-ms.y))
+                               let ms = vm.marqueeStart, let me = vm.marqueeEnd {
+                                let rect = CGRect(x:Swift.min(ms.x,me.x),
+                                                  y:Swift.min(ms.y,me.y),
+                                                  width:abs(me.x-ms.x),
+                                                  height:abs(me.y-ms.y))
                                 var hits = Set<String>()
                                 for (_,n) in doc.nodes {
-                                    let sp = vm.worldToScreen(CGPoint(x:n.x, y:n.y), sz:sz)
+                                    let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                                     if rect.contains(sp) { hits.insert(n.id) }
                                 }
-                                vm.selectedIds = hits
-                                vm.selectedId  = hits.count == 1 ? hits.first : nil
+                                vm.selectedIds=hits
+                                vm.selectedId=hits.count==1 ? hits.first:nil
                             }
-                            vm.marqueeStart    = nil
-                            vm.marqueeEnd      = nil
-                            vm.isMarqueeActive = false
+                            vm.marqueeStart=nil; vm.marqueeEnd=nil; vm.isMarqueeActive=false
                         }
                 )
 
@@ -1697,73 +1679,104 @@ struct MashExportSheet: View {
     }
 
     private func exportPNG(transparent: Bool) {
-        let scale: CGFloat = 2.0
+        let exportPxScale: CGFloat = 2.0
         let size  = CGSize(width:1600, height:1200)
-        let theme = doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
+        let theme = doc.customTheme ?? MashTheme.builtIn.first{$0.id==doc.themeId} ?? MashTheme.builtIn[0]
 
-        UIGraphicsBeginImageContextWithOptions(size, !transparent, scale)
+        UIGraphicsBeginImageContextWithOptions(size, !transparent, exportPxScale)
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
-
-        // Background
         if !transparent {
             ctx.setFillColor(UIColor(Color(hex:theme.canvasBackground)).cgColor)
-            ctx.fill(CGRect(origin:.zero, size:size))
+            ctx.fill(CGRect(origin:.zero,size:size))
         }
 
-        let cx = size.width / 2, cy = size.height / 2
+        let allNodes = Array(doc.nodes.values)
+        guard !allNodes.isEmpty else { UIGraphicsEndImageContext(); return }
 
-        // Draw connections
-        func drawLine(from: CGPoint, to: CGPoint) {
-            ctx.setStrokeColor(UIColor(Color(hex:theme.connectionColor)).withAlphaComponent(0.7).cgColor)
-            ctx.setLineWidth(2)
-            ctx.move(to: CGPoint(x:cx+from.x, y:cy+from.y))
-            ctx.addCurve(to: CGPoint(x:cx+to.x, y:cy+to.y),
-                         control1: CGPoint(x:cx+from.x+(to.x-from.x)*0.5, y:cy+from.y),
-                         control2: CGPoint(x:cx+from.x+(to.x-from.x)*0.5, y:cy+to.y))
+        // Auto-fit all node positions into the canvas
+        let padX: CGFloat = 140, padY: CGFloat = 100
+        let minX = allNodes.map{$0.x}.min()! - padX
+        let maxX = allNodes.map{$0.x}.max()! + padX
+        let minY = allNodes.map{$0.y}.min()! - padY
+        let maxY = allNodes.map{$0.y}.max()! + padY
+        let contentW = max(1, maxX-minX), contentH = max(1, maxY-minY)
+        let s = min(size.width/contentW, size.height/contentH, 2.5)  // fit scale
+        let ox = size.width/2  - (minX+contentW/2)*s   // origin offset x
+        let oy = size.height/2 - (minY+contentH/2)*s   // origin offset y
+        // world → canvas
+        func px(_ x:CGFloat)->CGFloat { ox+x*s }
+        func py(_ y:CGFloat)->CGFloat { oy+y*s }
+        func ps(_ v:CGFloat)->CGFloat { v*s }
+
+        // Tree edges
+        for (_,node) in doc.nodes {
+            for cid in node.children {
+                guard let ch=doc.nodes[cid] else{continue}
+                let fx=px(node.x),fy=py(node.y),tx=px(ch.x),ty=py(ch.y),dx=tx-fx
+                ctx.setStrokeColor(UIColor(Color(hex:theme.connectionColor)).withAlphaComponent(0.8).cgColor)
+                ctx.setLineWidth(max(1.5,s)); ctx.setLineDash(phase:0,lengths:[])
+                ctx.move(to:CGPoint(x:fx,y:fy))
+                ctx.addCurve(to:CGPoint(x:tx,y:ty),
+                    control1:CGPoint(x:fx+dx*0.5,y:fy),
+                    control2:CGPoint(x:tx-dx*0.5,y:ty))
+                ctx.strokePath()
+            }
+        }
+        // Reference connections
+        for conn in doc.connections {
+            guard let fn=doc.nodes[conn.fromId],let tn=doc.nodes[conn.toId] else{continue}
+            let fx=px(fn.x),fy=py(fn.y),tx=px(tn.x),ty=py(tn.y),dx=tx-fx
+            let col=(conn.color.map{UIColor(Color(hex:$0))} ?? UIColor(Color(hex:theme.connectionColor)))
+                .withAlphaComponent(0.6)
+            ctx.setStrokeColor(col.cgColor)
+            ctx.setLineWidth(max(1,s*0.7))
+            ctx.setLineDash(phase:0,lengths:conn.dashed ? [8,5]:[])
+            ctx.move(to:CGPoint(x:fx,y:fy))
+            ctx.addCurve(to:CGPoint(x:tx,y:ty),
+                control1:CGPoint(x:fx+dx*0.5,y:fy),
+                control2:CGPoint(x:tx-dx*0.5,y:ty))
             ctx.strokePath()
         }
-        for (_, node) in doc.nodes {
-            for childId in node.children {
-                guard let child = doc.nodes[childId] else { continue }
-                drawLine(from:CGPoint(x:node.x,y:node.y), to:CGPoint(x:child.x,y:child.y))
-            }
-        }
+        ctx.setLineDash(phase:0,lengths:[])
 
-        // Draw nodes (with attached images)
-        for (_, n) in doc.nodes {
-            let fill   = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
-            let border = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
-            let textC  = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
-            let nodeW  = n.width
-            // Extra height if node has an attached image
+        // Nodes
+        for n in allNodes {
+            let fillC  =UIColor(Color(hex:n.fillColor   ??(n.type == .root ? theme.rootFill   : theme.mainFill)))
+            let bordC  =UIColor(Color(hex:n.borderColor ??(n.type == .root ? theme.rootBorder : theme.mainBorder)))
+            let txtC   =UIColor(Color(hex:n.textColor   ??(n.type == .root ? theme.rootText   : theme.mainText)))
+            let nw     = ps(n.width)
+            let lblH   = n.type == .root ? ps(44) : ps(30)
             let hasImg = n.imageData != nil
-            let imgH: CGFloat  = hasImg ? 80 : 0
-            let textH: CGFloat = n.type == .root ? 50 : 36
-            let nodeH  = textH + imgH
-            let rect   = CGRect(x:cx+n.x-nodeW/2, y:cy+n.y-nodeH/2, width:nodeW, height:nodeH)
-            let path   = UIBezierPath(roundedRect:rect, cornerRadius:10)
-            fill.setFill(); path.fill()
-            border.setStroke(); path.lineWidth = 2; path.stroke()
-            // Draw image thumbnail at top of node
-            if let imgData = n.imageData, let uiImg = UIImage(data:imgData) {
-                let imgRect = CGRect(x:rect.minX+4, y:rect.minY+4, width:nodeW-8, height:imgH-8)
-                // Clip to rounded rect for the image area
+            let imgH   = hasImg ? ps(68) : CGFloat(0)
+            let nh     = lblH + imgH
+            let rect   = CGRect(x:px(n.x)-nw/2, y:py(n.y)-nh/2, width:nw, height:nh)
+            let path   = UIBezierPath(roundedRect:rect, cornerRadius:ps(10))
+            fillC.setFill(); path.fill()
+            bordC.setStroke(); path.lineWidth=max(1,s*0.7); path.stroke()
+
+            if hasImg, let dat=n.imageData, let img=UIImage(data:dat) {
+                let m=ps(3)
+                let box=CGRect(x:rect.minX+m, y:rect.minY+m, width:nw-m*2, height:imgH-m*2)
+                // aspect-fit inside box
+                let ia=img.size.width/img.size.height, ba=box.width/box.height
+                let dr: CGRect = ia>ba
+                    ? CGRect(x:box.minX, y:box.minY+(box.height-box.width/ia)/2,
+                             width:box.width, height:box.width/ia)
+                    : CGRect(x:box.minX+(box.width-box.height*ia)/2, y:box.minY,
+                             width:box.height*ia, height:box.height)
                 ctx.saveGState()
-                UIBezierPath(roundedRect:imgRect, cornerRadius:7).addClip()
-                uiImg.draw(in:imgRect)
+                UIBezierPath(roundedRect:box,cornerRadius:ps(5)).addClip()
+                img.draw(in:dr)
                 ctx.restoreGState()
             }
-            // Draw label below image (or centered if no image)
-            let attrs: [NSAttributedString.Key:Any] = [
-                .font: n.bold
-                    ? UIFont.boldSystemFont(ofSize:n.fontSize ?? 12)
-                    : UIFont.systemFont(ofSize:n.fontSize ?? 10),
-                .foregroundColor: textC
-            ]
-            let str     = NSAttributedString(string:n.text, attributes:attrs)
-            let strSize = str.size()
-            let textY   = rect.minY + imgH + (textH - strSize.height) / 2
-            str.draw(at:CGPoint(x:rect.midX - strSize.width/2, y:textY))
+
+            let fs  = max(8, n.fontSize.map{ps($0)} ?? (n.type == .root ? ps(13) : ps(10)))
+            let fnt = n.bold ? UIFont.boldSystemFont(ofSize:fs) : UIFont.systemFont(ofSize:fs)
+            let atr: [NSAttributedString.Key:Any] = [.font:fnt, .foregroundColor:txtC]
+            let str = NSAttributedString(string:n.text, attributes:atr)
+            let ssz = str.size()
+            let ty  = rect.minY + imgH + (lblH-ssz.height)/2
+            str.draw(at:CGPoint(x:rect.midX-ssz.width/2, y:max(ty, rect.minY+imgH+2)))
         }
 
         let img = UIGraphicsGetImageFromCurrentImageContext()
