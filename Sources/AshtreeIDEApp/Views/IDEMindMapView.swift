@@ -714,11 +714,26 @@ struct MashSideToolbar: View {
     var body: some View {
         GeometryReader { geo in
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
+            // Offset-based scrollable toolbar — no ScrollView, no gesture conflict
+            let itemSize: CGFloat = 40
+            let maxVisible: CGFloat = isVertical ? geo.size.height * 0.7 : geo.size.width * 0.7
+            let totalSize = CGFloat(items.count) * (itemSize + 2)
+            let needsScroll = totalSize > maxVisible
+            let clampedOffset = needsScroll
+                ? Swift.min(0, Swift.max(-(totalSize - maxVisible), toolbarScrollOffset))
+                : 0
+
             Group {
                 if isVertical {
                     VStack(spacing:2) { toolItems() }
+                        .offset(y: clampedOffset)
+                        .frame(height: needsScroll ? maxVisible : nil, alignment: .top)
+                        .clipped()
                 } else {
                     HStack(spacing:2) { toolItems() }
+                        .offset(x: clampedOffset)
+                        .frame(width: needsScroll ? maxVisible : nil, alignment: .leading)
+                        .clipped()
                 }
             }
             .padding(6)
@@ -728,6 +743,21 @@ struct MashSideToolbar: View {
                     .shadow(color:.black.opacity(0.5),radius:12)
             )
             .overlay(RoundedRectangle(cornerRadius:14).stroke(Color(hex:"#21262d"),lineWidth:0.5))
+            // Drag gesture ON THE TOOLBAR PILL to scroll it
+            // Uses .gesture (not simultaneous) so it only fires when started on the pill
+            .gesture(DragGesture(minimumDistance:4)
+                .onChanged { val in
+                    let delta = isVertical ? val.translation.height : val.translation.width
+                    toolbarScrollOffset = toolbarDragStart + delta
+                }
+                .onEnded { val in
+                    let delta = isVertical ? val.translation.height : val.translation.width
+                    let total = CGFloat(items.count) * (itemSize + 2)
+                    let max0  = -(total - maxVisible)
+                    toolbarScrollOffset = Swift.min(0, Swift.max(max0, toolbarDragStart + delta))
+                    toolbarDragStart    = toolbarScrollOffset
+                }
+            )
             .gesture(
                 LongPressGesture(minimumDuration:0.4)
                     .sequenced(before:DragGesture(minimumDistance:4,coordinateSpace:.global))
