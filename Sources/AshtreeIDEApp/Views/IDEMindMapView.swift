@@ -779,6 +779,7 @@ struct MashSideToolbar: View {
                     .frame(maxWidth: geo.size.width * 0.75)
                 }
             }
+            .fixedSize()   // ← KEY: toolbar only occupies its content size, not full GeometryReader
             .padding(6)
             .background(
                 RoundedRectangle(cornerRadius:14)
