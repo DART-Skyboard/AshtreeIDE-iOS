@@ -37,6 +37,7 @@ public enum MashNodeType: String, Codable, CaseIterable {
         case .note:     return 24
         case .image:    return 44
         case .link:     return 26
+        default:        return 28
         }
     }
 
@@ -49,6 +50,7 @@ public enum MashNodeType: String, Codable, CaseIterable {
         case .note:     return 10
         case .image:    return 10
         case .link:     return 10
+        default:        return 10
         }
     }
 }
@@ -572,6 +574,20 @@ public struct MashAshCodeGenerator {
             let text   = node.text
 
             switch node.type {
+            case .ashCode:
+                lines.append("\(indent)\(text)")
+            case .outTerminal:
+                lines.append("\(indent)output.terminal(\"\(text)\")")
+            case .out2D:
+                lines.append("\(indent)output.canvas2d(\"\(text)\")")
+            case .out3D:
+                lines.append("\(indent)output.scene3d(\"\(text)\")")
+            case .inputForm:
+                lines.append("\(indent)input.form(\"\(text)\")")
+            case .outputForm:
+                lines.append("\(indent)output.form(\"\(text)\")")
+            case .returnNode:
+                lines.append("\(indent)return \(text)")
             case .root:
                 lines.append("// Root: \(text)")
                 lines.append("")
@@ -633,6 +649,8 @@ public struct MashAshCodeGenerator {
                 }
             case .image:
                 lines.append("\(indent)// [image node: \(text)]")
+            default:
+                lines.append("\(indent)// \(text)")
             }
 
             // Process children
