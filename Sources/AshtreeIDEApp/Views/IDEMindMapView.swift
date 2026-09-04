@@ -768,9 +768,15 @@ struct MashSideToolbar: View {
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
             Group {
                 if isVertical {
-                    VStack(spacing:2) { toolItems() }
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing:2) { toolItems() }
+                    }
+                    .frame(maxHeight: geo.size.height * 0.75)
                 } else {
-                    HStack(spacing:2) { toolItems() }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing:2) { toolItems() }
+                    }
+                    .frame(maxWidth: geo.size.width * 0.75)
                 }
             }
             .padding(6)
@@ -944,11 +950,12 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                // Pan + marquee using named coord space — separate from node drag (.global)
+                // Pan + marquee: .global coord space, gated by isDraggingNode
                 .simultaneousGesture(
                     DragGesture(minimumDistance:6, coordinateSpace:.global)
                         .onChanged { val in
-                            guard !vm.isDraggingNode else { return }
+                            // Gate on both isDraggingNode and draggingId
+                            guard !vm.isDraggingNode, vm.draggingId == nil else { return }
                             if vm.tool == .marquee {
                                 if vm.marqueeStart == nil {
                                     vm.marqueeStart    = val.startLocation
@@ -968,6 +975,7 @@ struct MashCanvas: View {
                         }
                         .onEnded { _ in
                             vm.lastPanTranslation = .zero
+                            vm.isDraggingNode = false  // safety reset
                             if vm.isMarqueeActive,
                                let ms = vm.marqueeStart,
                                let me = vm.marqueeEnd {
@@ -1781,12 +1789,23 @@ struct MashExportSheet: View {
         let allNodes = Array(doc.nodes.values)
         guard !allNodes.isEmpty else { UIGraphicsEndImageContext(); return }
 
-        // Auto-fit all node positions into the canvas
-        let padX: CGFloat = 140, padY: CGFloat = 100
-        let minX = allNodes.map{$0.x}.min()! - padX
-        let maxX = allNodes.map{$0.x}.max()! + padX
-        let minY = allNodes.map{$0.y}.min()! - padY
-        let maxY = allNodes.map{$0.y}.max()! + padY
+        // Auto-fit: compute TRUE bounds including node dimensions (not just centers)
+        // Each node's visual footprint extends width/2 left+right, height/2 top+bottom
+        // Plus image height for nodes with attachments
+        var minX = CGFloat.infinity, maxX = -CGFloat.infinity
+        var minY = CGFloat.infinity, maxY = -CGFloat.infinity
+        for n in allNodes {
+            let hw = n.width / 2 + 20        // half width + margin
+            let imgH: CGFloat = n.imageData != nil ? 130 : 0
+            let hh = (imgH + 50) / 2 + 20    // half height + margin
+            minX = Swift.min(minX, n.x - hw)
+            maxX = Swift.max(maxX, n.x + hw)
+            minY = Swift.min(minY, n.y - hh)
+            maxY = Swift.max(maxY, n.y + hh)
+        }
+        // Extra safe padding around everything
+        let pad: CGFloat = 60
+        minX -= pad; maxX += pad; minY -= pad; maxY += pad
         let contentW = max(1, maxX-minX), contentH = max(1, maxY-minY)
         let s = min(size.width/contentW, size.height/contentH, 2.5)  // fit scale
         let ox = size.width/2  - (minX+contentW/2)*s   // origin offset x
