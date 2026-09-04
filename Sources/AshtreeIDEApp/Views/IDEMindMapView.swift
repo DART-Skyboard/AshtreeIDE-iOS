@@ -557,6 +557,42 @@ struct MashCanvasView: View {
                 onBuildRun:         { buildAndRunMash() })
                 .environmentObject(themeVM)
 
+            headerOverlay
+        }
+        .ignoresSafeArea(edges:.bottom)
+        .sheet(isPresented: $showThemePicker) {
+            MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showExport) {
+            MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showDocList) {
+            MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showNewDoc) {
+            MashNewDocSheet(isPresented:$showNewDoc).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showLoadFromEditor) {
+            MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
+                .environmentObject(themeVM).environmentObject(ideVM)
+        }
+        // Image picker triggered from context menu "Attach Image"
+        .sheet(item: Binding(
+            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
+            set: { vm.showImagePickerForNode = $0?.id }
+        )) { target in
+            NodeImagePickerSheet(nodeId: target.id, doc: doc)
+                .environmentObject(themeVM)
+        }
+        .sheet(isPresented: Binding(get:{vm.showNodeEditor},set:{vm.showNodeEditor=$0})) {
+            if let id=vm.editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ vm.showNodeEditor=false })
+                    .environmentObject(themeVM)
+            }
+        }
+    }
+
+    @ViewBuilder private var headerOverlay: some View {
             VStack {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
@@ -614,45 +650,6 @@ struct MashCanvasView: View {
                     Spacer()
                 }.padding(.bottom,8)
             }
-        }
-        .ignoresSafeArea(edges:.bottom)
-        .sheet(isPresented: $showThemePicker) {
-            MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showExport) {
-            MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showDocList) {
-            MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showNewDoc) {
-            MashNewDocSheet(isPresented:$showNewDoc).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showLoadFromEditor) {
-            MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
-                .environmentObject(themeVM).environmentObject(ideVM)
-        }
-        // Image picker triggered from context menu "Attach Image"
-        .sheet(item: Binding(
-            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
-            set: { vm.showImagePickerForNode = $0?.id }
-        )) { target in
-            NodeImagePickerSheet(nodeId: target.id, doc: doc)
-                .environmentObject(themeVM)
-        }
-        .sheet(isPresented: Binding(get:{vm.showNodeEditor},set:{vm.showNodeEditor=$0})) {
-            if let id=vm.editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ vm.showNodeEditor=false })
-                    .environmentObject(themeVM)
-            }
-        }
-        // Image picker from context menu
-        .sheet(item: Binding(
-            get:{ vm.showImagePickerForNode.map{ NodeImageTarget(id:$0) } },
-            set:{ vm.showImagePickerForNode=$0?.id }
-        )) { target in
-            NodeImagePickerSheet(nodeId:target.id, doc:doc).environmentObject(themeVM)
-        }
     }
 
     private func buildAndRunMash() {
