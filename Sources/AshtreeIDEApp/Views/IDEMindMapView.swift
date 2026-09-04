@@ -621,15 +621,13 @@ struct MashCanvasView: View {
             NodeImagePickerSheet(nodeId: target.id, doc: doc)
                 .environmentObject(themeVM)
         }
-        .sheet(isPresented: $showNodeEditor) {
-            if let id=vm.selectedId, let n=doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n,doc:doc,isPresented:$showNodeEditor)
+        .sheet(isPresented: Binding(get:{vm.showNodeEditor}, set:{vm.showNodeEditor=$0})) {
+            if let id=vm.editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ vm.showNodeEditor=false })
                     .environmentObject(themeVM)
             }
         }
-        .onChange(of: vm.contextNodeId) { id in
-            if id != nil && vm.showContextMenu == false { showNodeEditor = true }
-        }
+
     }
 
     @ViewBuilder private var headerOverlay: some View {
