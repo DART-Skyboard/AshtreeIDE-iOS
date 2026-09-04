@@ -641,6 +641,7 @@ struct MashCanvasView: View {
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
                 .background(.ultraThinMaterial)
+                Spacer()
                 HStack {
                     Spacer()
                     Text("\(Int(vm.scale*100))%")
@@ -652,7 +653,6 @@ struct MashCanvasView: View {
             }
         }
         .ignoresSafeArea(edges:.bottom)
-
         .sheet(isPresented: $showThemePicker) {
             MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
         }
@@ -677,16 +677,14 @@ struct MashCanvasView: View {
             NodeImagePickerSheet(nodeId: target.id, doc: doc)
                 .environmentObject(themeVM)
         }
-        // Node editor — driven by vm.showNodeEditor (set from context menu or double-tap)
-        .sheet(isPresented: Binding(
-            get: { vm.showNodeEditor },
-            set: { vm.showNodeEditor = $0 }
-        )) {
-            if let id = vm.editorNodeId ?? vm.selectedId, let n = doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n, doc:doc,
-                    onDismiss: { vm.showNodeEditor = false })
+        .sheet(isPresented: $showNodeEditor) {
+            if let id=vm.selectedId, let n=doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n,doc:doc,isPresented:$showNodeEditor)
                     .environmentObject(themeVM)
             }
+        }
+        .onChange(of: vm.contextNodeId) { id in
+            if id != nil && vm.showContextMenu == false { showNodeEditor = true }
         }
     }
 
@@ -737,14 +735,6 @@ struct MashSideToolbar: View {
         ToolItem(icon:"paintpalette.fill")           { showThemePicker = true },
         // Image node
         ToolItem(icon:"photo.badge.plus")            { vm.addImageNode(doc:doc) },
-        // ASH coding node types (always available, especially useful in ASH template)
-        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addASHNode(doc:doc, type:.ashCode) },
-        ToolItem(icon:"terminal")                { vm.addASHNode(doc:doc, type:.outTerminal) },
-        ToolItem(icon:"rectangle.on.rectangle")  { vm.addASHNode(doc:doc, type:.out2D) },
-        ToolItem(icon:"cube")                    { vm.addASHNode(doc:doc, type:.out3D) },
-        ToolItem(icon:"arrow.down.to.line")      { vm.addASHNode(doc:doc, type:.inputForm) },
-        ToolItem(icon:"arrow.up.from.line")      { vm.addASHNode(doc:doc, type:.outputForm) },
-        ToolItem(icon:"arrowshape.turn.up.left") { vm.addASHNode(doc:doc, type:.returnNode) },
         // Export
         ToolItem(icon:"square.and.arrow.up")         { showExport = true },
         // Load code into map
@@ -754,25 +744,16 @@ struct MashSideToolbar: View {
         // New map / Open map
         ToolItem(icon:"plus.square.on.square")       { showNewDoc = true },
         ToolItem(icon:"folder.fill")                 { showDocList = true },
-        // ASH coding nodes
-        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addAshNode(doc:doc, type:.ashCode)   },
-        ToolItem(icon:"arrow.down.to.line")          { vm.addAshNode(doc:doc, type:.inputForm)  },
-        ToolItem(icon:"terminal")                    { vm.addAshNode(doc:doc, type:.outputForm)  },
-        ToolItem(icon:"rectangle.on.rectangle")      { vm.addAshNode(doc:doc, type:.out2D)      },
-        ToolItem(icon:"cube.transparent")            { vm.addAshNode(doc:doc, type:.out3D)      },
-        ToolItem(icon:"arrow.uturn.backward.circle") { vm.addAshNode(doc:doc, type:.returnNode)  },
     ]}
 
     var body: some View {
         GeometryReader { geo in
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
-            // Toolbar content — fixedSize so it only takes content dimensions
-            // Plain VStack/HStack — NO ScrollView (ScrollView steals DragGestures and kills pan)
             Group {
                 if isVertical {
-                    VStack(spacing:1) { toolItems() }
+                    VStack(spacing:2) { toolItems() }
                 } else {
-                    HStack(spacing:1) { toolItems() }
+                    HStack(spacing:2) { toolItems() }
                 }
             }
             .padding(6)
@@ -815,21 +796,21 @@ struct MashSideToolbar: View {
     private func toolItems() -> some View {
         ForEach(items) { item in
             Button(action:item.action) {
-                Image(systemName:item.icon).font(.system(size:13))
+                Image(systemName:item.icon).font(.system(size:16))
                     .foregroundColor(isActive(item.icon) ? .black : themeVM.dim)
-                    .frame(width:32,height:32)
+                    .frame(width:38,height:38)
                     .background(isActive(item.icon) ? themeVM.accent : themeVM.accent.opacity(0.06))
-                    .cornerRadius(8)
+                    .cornerRadius(9)
             }.buttonStyle(.plain)
         }
     }
 
     private func isActive(_ icon: String) -> Bool {
         switch icon {
-        case "cursorarrow":                 return vm.tool == .select
-        case "line.diagonal":               return vm.tool == .mainLink
-        case "arrow.left.and.right":        return vm.tool == .connect
-        case "arrow.right":                 return vm.tool == .connectSingle
+        case "cursorarrow":                return vm.tool == .select
+        case "line.diagonal":              return vm.tool == .mainLink
+        case "arrow.left.and.right":       return vm.tool == .connect
+        case "arrow.right":                return vm.tool == .connectSingle
         case "rectangle.dashed.badge.plus": return vm.tool == .marquee
         default: return false
         }
