@@ -923,8 +923,7 @@ struct MashCanvas: View {
                         }
                     }.allowsHitTesting(false)
                     // Nodes
-                    // Stable ForEach — use zIndex to lift dragging node
-                    ForEach(Array(doc.nodes.values), id:\.id) { n in
+                    ForEach(Array(doc.nodes.values),id:\.id) { n in
                         let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                         MashNodeView(nodeData:n,theme:theme,
                             isSelected:vm.selectedId==n.id||vm.selectedIds.contains(n.id),
@@ -932,17 +931,9 @@ struct MashCanvas: View {
                         .scaleEffect(vm.scale)
                         .position(sp)
                         .gesture(nodeDrag(n,sz:sz))
-                        .onTapGesture(count:2) {
-                            vm.selectedId     = n.id
-                            vm.editorNodeId   = n.id
-                            vm.showNodeEditor = true
-                            vm.showContextMenu = false
-                        }
-                        .onTapGesture(count:1) { vm.handleNodeTap(n.id, doc:doc) }
-                        .onLongPressGesture(minimumDuration:0.4) {
-                            vm.selectedId    = n.id
-                            vm.contextNodeId = n.id
-                            vm.showContextMenu = true
+                        .onTapGesture{ vm.handleNodeTap(n.id,doc:doc) }
+                        .onLongPressGesture(minimumDuration:0.4){
+                            vm.selectedId=n.id; vm.contextNodeId=n.id; vm.showContextMenu=true
                         }
                     }
                 }
@@ -1031,8 +1022,7 @@ struct MashCanvas: View {
                 }
             }
             .frame(width:sz.width,height:sz.height)
-
-            // Pinch to zoom — 2-finger, doesn't conflict with 1-finger pan
+            // Pinch to zoom — on outer container so it works everywhere
             .gesture(MagnificationGesture()
                 .onChanged { v in
                     vm.scale = Swift.min(Swift.max(vm.baseScale * v, vm.minScale), vm.maxScale)
@@ -1064,39 +1054,15 @@ struct MashCanvas: View {
                 d.nodes[n.id]?.y = vm.dragStartWorld.y + val.translation.height / vm.scale
                 MashStore.shared.updateDocument(d)
             }
-            .onEnded { val in
+            .onEnded { _ in
                 vm.isDraggingNode = false
-                // Drop-on-node: check if released near another node → reparent
-                let dropPt = vm.screenToWorld(
-                    CGPoint(x: val.location.x - (UIScreen.main.bounds.width  - sz.width)  / 2,
-                            y: val.location.y - (UIScreen.main.bounds.height - sz.height) / 2 - 44),
-                    sz: sz)
-                var reparented = false
-                for (_, other) in doc.nodes where other.id != n.id {
-                    let dist = sqrt(pow(dropPt.x-other.x, 2) + pow(dropPt.y-other.y, 2))
-                    if dist < (other.width * 0.7) {
-                        // Dropped on another node — reparent
-                        var d = doc
-                        if let oldPid = d.nodes[n.id]?.parentId {
-                            d.nodes[oldPid]?.children.removeAll { $0 == n.id }
-                        }
-                        d.nodes[n.id]?.parentId = other.id
-                        if !(d.nodes[other.id]?.children.contains(n.id) ?? false) {
-                            d.nodes[other.id]?.children.append(n.id)
-                        }
-                        MashStore.shared.updateDocument(d)
-                        reparented = true
-                        break
-                    }
-                }
-                vm.draggingId = nil
-                if !reparented {
-                    let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
-                    if strictLayouts.contains(doc.layout) {
-                        var d = doc
-                        vm.applyAutoLayout(doc: &d)
-                        MashStore.shared.updateDocument(d)
-                    }
+                vm.draggingId     = nil
+                // Snap back if using a strict template layout
+                let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
+                if strictLayouts.contains(doc.layout) {
+                    var d = doc
+                    vm.applyAutoLayout(doc: &d)
+                    MashStore.shared.updateDocument(d)
                 }
             }
     }
