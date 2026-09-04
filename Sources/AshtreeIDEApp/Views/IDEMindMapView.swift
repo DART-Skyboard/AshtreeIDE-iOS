@@ -622,7 +622,7 @@ struct MashCanvasView: View {
                 .environmentObject(themeVM)
         }
         .sheet(isPresented: $showNodeEditor) {
-            if let id=editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
+            if let id=vm.selectedId, let n=doc.nodes[id] {
                 MashNodeEditorSheet(nodeData:n,doc:doc,onDismiss:{showNodeEditor=false})
                     .environmentObject(themeVM)
             }
