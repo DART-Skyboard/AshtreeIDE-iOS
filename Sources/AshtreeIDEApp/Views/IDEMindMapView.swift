@@ -175,14 +175,14 @@ class MashCanvasVM: ObservableObject {
         guard let parent = d.nodes[parentId] else { return }
         let newId  = UUID().uuidString
         let labels: [MashNodeType:String] = [
-            .ashCode:"// ASH Code", .ashInput:"Input",
-            .ashOutput:"Output", .ash2D:"2D Canvas",
-            .ash3D:"3D Scene", .ashReturn:"Return"
+            .ashCode:"// ASH Code", .inputForm:"Input",
+            .outputForm:"Output", .out2D:"2D Canvas",
+            .out3D:"3D Scene", .returnNode:"Return"
         ]
         let offsets: [MashNodeType:CGPoint] = [
-            .ashCode:CGPoint(x:0,y:-180), .ashInput:CGPoint(x:-160,y:120),
-            .ashOutput:CGPoint(x:160,y:120), .ash2D:CGPoint(x:80,y:120),
-            .ash3D:CGPoint(x:160,y:200), .ashReturn:CGPoint(x:0,y:200)
+            .ashCode:CGPoint(x:0,y:-180), .inputForm:CGPoint(x:-160,y:120),
+            .outputForm:CGPoint(x:160,y:120), .out2D:CGPoint(x:80,y:120),
+            .out3D:CGPoint(x:160,y:200), .returnNode:CGPoint(x:0,y:200)
         ]
         let off = offsets[type] ?? CGPoint(x:0,y:140)
         let node = MashNodeData(id:newId, type:type,
@@ -756,11 +756,11 @@ struct MashSideToolbar: View {
         ToolItem(icon:"folder.fill")                 { showDocList = true },
         // ASH coding nodes
         ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addAshNode(doc:doc, type:.ashCode)   },
-        ToolItem(icon:"arrow.down.to.line")          { vm.addAshNode(doc:doc, type:.ashInput)  },
-        ToolItem(icon:"terminal")                    { vm.addAshNode(doc:doc, type:.ashOutput)  },
-        ToolItem(icon:"rectangle.on.rectangle")      { vm.addAshNode(doc:doc, type:.ash2D)      },
-        ToolItem(icon:"cube.transparent")            { vm.addAshNode(doc:doc, type:.ash3D)      },
-        ToolItem(icon:"arrow.uturn.backward.circle") { vm.addAshNode(doc:doc, type:.ashReturn)  },
+        ToolItem(icon:"arrow.down.to.line")          { vm.addAshNode(doc:doc, type:.inputForm)  },
+        ToolItem(icon:"terminal")                    { vm.addAshNode(doc:doc, type:.outputForm)  },
+        ToolItem(icon:"rectangle.on.rectangle")      { vm.addAshNode(doc:doc, type:.out2D)      },
+        ToolItem(icon:"cube.transparent")            { vm.addAshNode(doc:doc, type:.out3D)      },
+        ToolItem(icon:"arrow.uturn.backward.circle") { vm.addAshNode(doc:doc, type:.returnNode)  },
     ]}
 
     var body: some View {
