@@ -779,7 +779,6 @@ struct MashSideToolbar: View {
                     .frame(maxWidth: geo.size.width * 0.75)
                 }
             }
-            .fixedSize()   // ← KEY: toolbar only occupies its content size, not full GeometryReader
             .padding(6)
             .background(
                 RoundedRectangle(cornerRadius:14)
@@ -924,10 +923,8 @@ struct MashCanvas: View {
                         }
                     }.allowsHitTesting(false)
                     // Nodes
-                    // Sort: dragging node last so it renders on top
-                    ForEach(Array(doc.nodes.values).sorted { a, b in
-                        a.id == vm.draggingId ? true : b.id == vm.draggingId ? false : false
-                    }, id:\.id) { n in
+                    // Stable ForEach — use zIndex to lift dragging node
+                    ForEach(Array(doc.nodes.values), id:\.id) { n in
                         let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                         MashNodeView(nodeData:n,theme:theme,
                             isSelected:vm.selectedId==n.id||vm.selectedIds.contains(n.id),
