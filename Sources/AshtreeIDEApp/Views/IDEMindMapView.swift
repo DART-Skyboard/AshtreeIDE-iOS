@@ -34,9 +34,6 @@ class MashCanvasVM: ObservableObject {
     // Context menu
     @Published var contextNodeId:   String? = nil
     @Published var showContextMenu: Bool = false
-    // Node editor — drive directly from VM so onChange isn't needed
-    @Published var showNodeEditor:  Bool = false
-    @Published var editorNodeId:    String? = nil
     // Connection selection + editing
     @Published var selectedConnId:  String? = nil
     @Published var showConnMenu:    Bool = false
@@ -89,32 +86,50 @@ class MashCanvasVM: ObservableObject {
         selectedId = newId
     }
 
+    func addFreeNode(doc: MashDocument) {
+        var d = doc
+        let newId = UUID().uuidString
+        let cx = (d.nodes.values.map{$0.x}.reduce(0,+) / CGFloat(max(1,d.nodes.count))) + 120
+        let cy = (d.nodes.values.map{$0.y}.reduce(0,+) / CGFloat(max(1,d.nodes.count))) + 120
+        let node = MashNodeData(id:newId, type:.main, text:"New Node",
+            detail:"", url:"", imageData:nil, x:cx, y:cy, width:130,
+            children:[], parentId:nil, collapsed:false,
+            fillColor:nil, borderColor:nil, textColor:nil,
+            cornerStyle:nil, fontSize:nil, bold:false, italic:false)
+        d.nodes[newId] = node
+        store.updateDocument(d)
+        selectedId = newId
+    }
+
     func addASHNode(doc: MashDocument, type: MashNodeType) {
         let parentId = selectedId ?? doc.rootId
         guard let parent = doc.nodes[parentId] else { return }
         var d = doc
         let newId = UUID().uuidString
-        let defaultText: String
-        switch type {
-        case .ashCode:     defaultText = "// ASH code here"
-        case .outTerminal: defaultText = "terminal.output()"
-        case .out2D:       defaultText = "canvas.render()"
-        case .out3D:       defaultText = "scene.render()"
-        case .inputForm:   defaultText = "input.form()"
-        case .outputForm:  defaultText = "output.display()"
-        case .returnNode:  defaultText = "return result"
-        default:           defaultText = type.rawValue
-        }
-        let node = MashNodeData(id:newId, type:type, text:defaultText,
+        let defaults: [MashNodeType:String] = [
+            .ashCode:"// ASH code here", .outTerminal:"output.terminal()",
+            .out2D:"canvas.render()", .out3D:"scene.render()",
+            .inputForm:"input.form()", .outputForm:"output.display()",
+            .returnNode:"return result"
+        ]
+        let node = MashNodeData(id:newId, type:type,
+            text:defaults[type] ?? type.rawValue,
             detail:"", url:"", imageData:nil,
-            x:parent.x + 160, y:parent.y,
-            width:150, children:[], parentId:parentId,
-            collapsed:false, fillColor:nil, borderColor:nil,
-            textColor:nil, cornerStyle:nil, fontSize:nil, bold:false, italic:false)
+            x:parent.x+160, y:parent.y, width:150,
+            children:[], parentId:parentId, collapsed:false,
+            fillColor:nil, borderColor:nil, textColor:nil,
+            cornerStyle:nil, fontSize:nil, bold:false, italic:false)
         d.nodes[newId] = node
         d.nodes[parentId]?.children.append(newId)
         store.updateDocument(d)
         selectedId = newId
+    }
+
+    func deleteConnection(_ id: String, doc: MashDocument) {
+        var d = doc
+        d.connections.removeAll { $0.id == id }
+        store.updateDocument(d)
+        selectedConnId = nil; showConnMenu = false
     }
 
     func addImageNode(doc: MashDocument) {
@@ -166,37 +181,6 @@ class MashCanvasVM: ObservableObject {
         d.connections.removeAll { $0.id == id }
         store.updateDocument(d)
         selectedConnId = nil; showConnMenu = false
-    }
-
-    // Add an ASH coding node
-    func addAshNode(doc: MashDocument, type: MashNodeType) {
-        var d = doc
-        let parentId = selectedId ?? doc.rootId
-        guard let parent = d.nodes[parentId] else { return }
-        let newId  = UUID().uuidString
-        let labels: [MashNodeType:String] = [
-            .ashCode:"// ASH Code", .inputForm:"Input",
-            .outputForm:"Output", .out2D:"2D Canvas",
-            .out3D:"3D Scene", .returnNode:"Return"
-        ]
-        let offsets: [MashNodeType:CGPoint] = [
-            .ashCode:CGPoint(x:0,y:-180), .inputForm:CGPoint(x:-160,y:120),
-            .outputForm:CGPoint(x:160,y:120), .out2D:CGPoint(x:80,y:120),
-            .out3D:CGPoint(x:160,y:200), .returnNode:CGPoint(x:0,y:200)
-        ]
-        let off = offsets[type] ?? CGPoint(x:0,y:140)
-        let node = MashNodeData(id:newId, type:type,
-            text: labels[type] ?? type.rawValue,
-            detail:"", url:"", imageData:nil,
-            x: parent.x + off.x, y: parent.y + off.y,
-            width: type == .ashCode ? 200 : 150,
-            children:[], parentId: parentId,
-            collapsed:false, fillColor:nil, borderColor:nil,
-            textColor:nil, cornerStyle:nil, fontSize:nil, bold:false, italic:false)
-        d.nodes[newId] = node
-        d.nodes[parentId]?.children.append(newId)
-        store.updateDocument(d)
-        selectedId = newId
     }
 
     // Add a free-standing node (no parent link — user links manually)
@@ -594,44 +578,7 @@ struct MashCanvasView: View {
                 onBuildRun:         { buildAndRunMash() })
                 .environmentObject(themeVM)
 
-            headerOverlay
-        }
-        .ignoresSafeArea(edges:.bottom)
-        .sheet(isPresented: $showThemePicker) {
-            MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showExport) {
-            MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showDocList) {
-            MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showNewDoc) {
-            MashNewDocSheet(isPresented:$showNewDoc).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showLoadFromEditor) {
-            MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
-                .environmentObject(themeVM).environmentObject(ideVM)
-        }
-        // Image picker triggered from context menu "Attach Image"
-        .sheet(item: Binding(
-            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
-            set: { vm.showImagePickerForNode = $0?.id }
-        )) { target in
-            NodeImagePickerSheet(nodeId: target.id, doc: doc)
-                .environmentObject(themeVM)
-        }
-        .sheet(isPresented: Binding(get:{vm.showNodeEditor}, set:{vm.showNodeEditor=$0})) {
-            if let id=vm.editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ vm.showNodeEditor=false })
-                    .environmentObject(themeVM)
-            }
-        }
-
-    }
-
-    @ViewBuilder private var headerOverlay: some View {
-        VStack {
+            VStack {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
                         HStack(spacing:4) {
@@ -688,6 +635,45 @@ struct MashCanvasView: View {
                     Spacer()
                 }.padding(.bottom,8)
             }
+        }
+        .ignoresSafeArea(edges:.bottom)
+        .sheet(isPresented: $showThemePicker) {
+            MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showExport) {
+            MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showDocList) {
+            MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showNewDoc) {
+            MashNewDocSheet(isPresented:$showNewDoc).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showLoadFromEditor) {
+            MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
+                .environmentObject(themeVM).environmentObject(ideVM)
+        }
+        // Image picker triggered from context menu "Attach Image"
+        .sheet(item: Binding(
+            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
+            set: { vm.showImagePickerForNode = $0?.id }
+        )) { target in
+            NodeImagePickerSheet(nodeId: target.id, doc: doc)
+                .environmentObject(themeVM)
+        }
+        .sheet(isPresented: Binding(get:{vm.showNodeEditor},set:{vm.showNodeEditor=$0})) {
+            if let id=vm.editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ vm.showNodeEditor=false })
+                    .environmentObject(themeVM)
+            }
+        }
+        // Image picker from context menu
+        .sheet(item: Binding(
+            get:{ vm.showImagePickerForNode.map{ NodeImageTarget(id:$0) } },
+            set:{ vm.showImagePickerForNode=$0?.id }
+        )) { target in
+            NodeImagePickerSheet(nodeId:target.id, doc:doc).environmentObject(themeVM)
+        }
     }
 
     private func buildAndRunMash() {
@@ -907,7 +893,9 @@ struct MashCanvas: View {
                         MashNodeView(nodeData:n,theme:theme,
                             isSelected:vm.selectedId==n.id||vm.selectedIds.contains(n.id),
                             isConnectFirst:vm.connectionFirst==n.id)
-                        .scaleEffect(vm.scale)
+                        .scaleEffect(vm.scale * (vm.draggingId==n.id ? 1.06 : 1.0))
+                        .shadow(color:vm.draggingId==n.id ? .black.opacity(0.35) : .clear, radius:10, y:4)
+                        .zIndex(vm.draggingId==n.id ? 1 : 0)
                         .position(sp)
                         .gesture(nodeDrag(n,sz:sz))
                         .onTapGesture{ vm.handleNodeTap(n.id,doc:doc) }
@@ -1033,15 +1021,34 @@ struct MashCanvas: View {
                 d.nodes[n.id]?.y = vm.dragStartWorld.y + val.translation.height / vm.scale
                 MashStore.shared.updateDocument(d)
             }
-            .onEnded { _ in
+            .onEnded { val in
                 vm.isDraggingNode = false
-                vm.draggingId     = nil
-                // Snap back if using a strict template layout
-                let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
-                if strictLayouts.contains(doc.layout) {
-                    var d = doc
-                    vm.applyAutoLayout(doc: &d)
-                    MashStore.shared.updateDocument(d)
+                // Drop-on-node: reparent if dropped near another node
+                let dropW = vm.dragStartWorld.x + val.translation.width / vm.scale
+                let dropH = vm.dragStartWorld.y + val.translation.height / vm.scale
+                var reparented = false
+                for (_,other) in doc.nodes where other.id != n.id {
+                    let dist = sqrt(pow(dropW-other.x,2)+pow(dropH-other.y,2))
+                    if dist < other.width * 0.7 {
+                        var d = doc
+                        if let oldPid = d.nodes[n.id]?.parentId {
+                            d.nodes[oldPid]?.children.removeAll{$0==n.id}
+                        }
+                        d.nodes[n.id]?.parentId = other.id
+                        if !(d.nodes[other.id]?.children.contains(n.id) ?? false) {
+                            d.nodes[other.id]?.children.append(n.id)
+                        }
+                        MashStore.shared.updateDocument(d)
+                        reparented = true; break
+                    }
+                }
+                vm.draggingId = nil
+                if !reparented {
+                    let strictLayouts: [MashLayout] = [.tree,.fishbone,.orgchart,.timeline]
+                    if strictLayouts.contains(doc.layout) {
+                        var d = doc; vm.applyAutoLayout(doc:&d)
+                        MashStore.shared.updateDocument(d)
+                    }
                 }
             }
     }
@@ -1088,11 +1095,7 @@ struct MashContextMenu: View {
     var node:MashNodeData? { doc.nodes[nodeId] }
     var body: some View {
         VStack(spacing:0) {
-            row("Edit Node",     "pencil")        {
-                vm.showContextMenu = false
-                vm.editorNodeId    = nodeId
-                vm.showNodeEditor  = true
-            }
+            row("Edit Node",     "pencil")        { vm.showContextMenu=false; vm.selectedId=nodeId }
             div()
             row("Add Child",     "plus.circle")   { vm.addChildToSelected(doc:doc); vm.showContextMenu=false }
             div()
@@ -1152,33 +1155,32 @@ struct MashNodeView: View {
     var borderHex: String { nodeData.borderColor ?? borderForType }
     var textHex:   String { nodeData.textColor   ?? textForType }
 
-    struct ASHBadge { let icon: String; let label: String; let color: Color }
+    struct ASHBadge { let icon:String; let label:String; let color:Color }
     var ashBadge: ASHBadge? {
         switch nodeData.type {
-        case .ashCode:     return ASHBadge(icon:"chevron.left.forwardslash.chevron.right", label:"ASH", color:Color(hex:"#00ffcc"))
-        case .outTerminal: return ASHBadge(icon:"terminal",            label:"TERMINAL OUT", color:Color(hex:"#00ff66"))
-        case .out2D:       return ASHBadge(icon:"rectangle.on.rectangle", label:"2D OUT",   color:Color(hex:"#aa77ff"))
-        case .out3D:       return ASHBadge(icon:"cube",                label:"3D OUT",      color:Color(hex:"#ffaa00"))
-        case .inputForm:   return ASHBadge(icon:"arrow.down.to.line",  label:"INPUT",       color:Color(hex:"#00ccff"))
-        case .outputForm:  return ASHBadge(icon:"arrow.up.from.line",  label:"OUTPUT",      color:Color(hex:"#ff6688"))
-        case .returnNode:  return ASHBadge(icon:"arrowshape.turn.up.left", label:"RETURN",  color:Color(hex:"#ffee44"))
+        case .ashCode:     return ASHBadge(icon:"chevron.left.forwardslash.chevron.right",label:"ASH",color:Color(hex:"#00ffcc"))
+        case .outTerminal: return ASHBadge(icon:"terminal",label:"TERMINAL OUT",color:Color(hex:"#00ff66"))
+        case .out2D:       return ASHBadge(icon:"rectangle.on.rectangle",label:"2D OUT",color:Color(hex:"#aa77ff"))
+        case .out3D:       return ASHBadge(icon:"cube",label:"3D OUT",color:Color(hex:"#ffaa00"))
+        case .inputForm:   return ASHBadge(icon:"arrow.down.to.line",label:"INPUT",color:Color(hex:"#00ccff"))
+        case .outputForm:  return ASHBadge(icon:"arrow.up.from.line",label:"OUTPUT",color:Color(hex:"#ff6688"))
+        case .returnNode:  return ASHBadge(icon:"arrowshape.turn.up.left",label:"RETURN",color:Color(hex:"#ffee44"))
         default: return nil
         }
     }
-
     var fillForType: String {
         switch nodeData.type {
         case .root:        return theme.rootFill
         case .main:        return theme.mainFill
         case .subtitle:    return theme.subtitleFill
         case .category:    return theme.categoryFill
-        case .ashCode:     return "#0d1f2d"   // dark blue-black for code
-        case .outTerminal: return "#0a1a0a"   // terminal green-black
-        case .out2D:       return "#1a0d2e"   // purple for 2D/vector
-        case .out3D:       return "#1a1200"   // amber-black for 3D
-        case .inputForm:   return "#0d1a1a"   // teal-black for input
-        case .outputForm:  return "#1a0d0d"   // red-black for output
-        case .returnNode:  return "#1a1a0d"   // yellow-black for return
+        case .ashCode:     return "#0d1f2d"
+        case .outTerminal: return "#0a1a0a"
+        case .out2D:       return "#1a0d2e"
+        case .out3D:       return "#1a1200"
+        case .inputForm:   return "#0d1a1a"
+        case .outputForm:  return "#1a0d0d"
+        case .returnNode:  return "#1a1a0d"
         default:           return theme.noteFill
         }
     }
@@ -1226,23 +1228,16 @@ struct MashNodeView: View {
                     .padding(.horizontal, 4).padding(.top, 4)
             }
 
-            // ASH node type badge
             if let badge = ashBadge {
                 HStack(spacing:4) {
-                    Image(systemName: badge.icon)
-                        .font(.system(size:9, weight:.bold))
+                    Image(systemName:badge.icon).font(.system(size:8,weight:.bold))
                         .foregroundColor(badge.color)
-                    Text(badge.label)
-                        .font(.system(size:7, weight:.bold, design:.monospaced))
-                        .foregroundColor(badge.color)
-                        .kerning(0.5)
+                    Text(badge.label).font(.system(size:6,weight:.bold,design:.monospaced))
+                        .foregroundColor(badge.color).kerning(0.5)
                 }
-                .padding(.horizontal,8).padding(.vertical,3)
-                .background(badge.color.opacity(0.15))
-                .cornerRadius(4)
-                .padding(.top, 4)
+                .padding(.horizontal,6).padding(.vertical,2)
+                .background(badge.color.opacity(0.15)).cornerRadius(4).padding(.top,3)
             }
-
             Text(nodeData.text)
                 .font(.system(size: fontSize,
                               weight: nodeData.bold ? .bold : .regular,
@@ -1285,7 +1280,7 @@ struct MashNodeView: View {
 struct MashNodeEditorSheet: View {
     let nodeData:   MashNodeData
     let doc:        MashDocument
-    let onDismiss:  () -> Void
+    @Binding var isPresented: Bool
     @EnvironmentObject var themeVM: IDEThemeViewModel
     @StateObject private var store = MashStore.shared
 
@@ -1297,36 +1292,15 @@ struct MashNodeEditorSheet: View {
     @State private var type:   MashNodeType = .note
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
-    // FocusState MUST be at this level, not inside NavigationView
     @FocusState private var labelFocused: Bool
 
     var body: some View {
-        // Plain VStack — no NavigationView.
-        // NavigationView breaks @FocusState in sheets on iOS 16+.
-        ZStack {
-            Color(hex:"#0d1117").ignoresSafeArea()
-            VStack(spacing:0) {
-                // Custom navigation bar
-                HStack {
-                    Button("Cancel") { onDismiss() }
-                        .font(.system(size:13,design:.monospaced))
-                        .foregroundColor(themeVM.dim)
-                    Spacer()
-                    Text("Edit Node")
-                        .font(.system(size:13,weight:.semibold,design:.monospaced))
-                        .foregroundColor(themeVM.text)
-                    Spacer()
-                    Button("Save") { saveNode(); onDismiss() }
-                        .font(.system(size:13,weight:.semibold,design:.monospaced))
-                        .foregroundColor(themeVM.accent)
-                }
-                .padding(.horizontal,18).padding(.vertical,14)
-                .background(Color(hex:"#161b22"))
-                .overlay(Divider().background(Color(hex:"#21262d")), alignment:.bottom)
-
+        NavigationView {
+            ZStack {
+                Color(hex:"#0d1117").ignoresSafeArea()
                 ScrollView {
                     VStack(alignment:.leading, spacing:16) {
-                        // Node type picker
+                        // Node type
                         ScrollView(.horizontal, showsIndicators:false) {
                             HStack(spacing:6) {
                                 ForEach(MashNodeType.allCases, id:\.self) { t in
@@ -1337,45 +1311,41 @@ struct MashNodeEditorSheet: View {
                                             .padding(.horizontal,10).padding(.vertical,5)
                                             .background(type==t ? themeVM.accent : Color(hex:"#161b22"))
                                             .cornerRadius(6)
-                                    }.buttonStyle(.plain)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
 
-                        // ── LABEL — primary editable field ──────────────
-                        VStack(alignment:.leading, spacing:6) {
-                            Text("LABEL")
+                        // Text
+                        // Label field with auto-focus
+                        VStack(alignment:.leading, spacing:4) {
+                            Text("LABEL".uppercased())
                                 .font(.system(size:7,weight:.bold,design:.monospaced))
                                 .foregroundColor(themeVM.dim).kerning(1.5)
                             TextField("Node label", text: $text, axis: .vertical)
-                                .font(.system(size:15,design:.monospaced))
+                                .font(.system(size:13))
                                 .foregroundColor(themeVM.accent)
                                 .focused($labelFocused)
-                                .textFieldStyle(.plain)
-                                .padding(12)
-                                .background(Color(hex:"#0d1117"))
-                                .cornerRadius(10)
-                                .overlay(RoundedRectangle(cornerRadius:10)
-                                    .stroke(labelFocused
-                                            ? themeVM.accent
-                                            : Color(hex:"#30363d"),
-                                            lineWidth: labelFocused ? 1.5 : 0.5))
-                                .submitLabel(.done)
+                                .padding(10).background(Color(hex:"#161b22")).cornerRadius(8)
+                                .overlay(RoundedRectangle(cornerRadius:8)
+                                    .stroke(labelFocused ? themeVM.accent : Color(hex:"#21262d"), lineWidth:0.5))
                         }
-
                         field("Notes / Detail", binding: $detail, mono: false)
-                        field("Hyperlink URL",  binding: $url,    mono: true)
+                        field("Hyperlink URL", binding: $url, mono: true)
 
+                        // Style
                         HStack(spacing:12) {
-                            Toggle("Bold",   isOn: $bold).tint(themeVM.accent)
+                            Toggle("Bold", isOn: $bold).tint(themeVM.accent)
                             Toggle("Italic", isOn: $italic).tint(themeVM.accent)
                         }
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
 
+                        // Image
                         Button { showImagePicker = true } label: {
                             Label(pickedImage != nil ? "Change Image" : "Attach Image",
-                                  systemImage:"photo.badge.plus")
+                                  systemImage: "photo.badge.plus")
                                 .font(.system(size:11,design:.monospaced))
                                 .foregroundColor(themeVM.accent)
                                 .frame(maxWidth:.infinity).padding(.vertical,10)
@@ -1383,24 +1353,36 @@ struct MashNodeEditorSheet: View {
                         }
                         if let img = pickedImage {
                             Image(uiImage:img).resizable().scaledToFit()
-                                .frame(maxHeight:140).cornerRadius(8)
+                                .frame(maxHeight:120).cornerRadius(8)
                         }
                     }
                     .padding(16)
                 }
             }
-        }
-        .onAppear {
-            text   = nodeData.text
-            detail = nodeData.detail
-            url    = nodeData.url
-            bold   = nodeData.bold
-            italic = nodeData.italic
-            type   = nodeData.type
-            if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
-            // Focus after the sheet animation finishes (~0.6s on iOS)
-            DispatchQueue.main.asyncAfter(deadline:.now()+0.65) {
-                labelFocused = true
+            .navigationTitle("Edit Node")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement:.navigationBarLeading) {
+                    Button("Cancel") { isPresented = false }.foregroundColor(themeVM.dim)
+                }
+                ToolbarItem(placement:.navigationBarTrailing) {
+                    Button("Save") { saveNode(); isPresented = false }
+                        .font(.system(size:11,weight:.semibold,design:.monospaced))
+                        .foregroundColor(themeVM.accent)
+                }
+            }
+            .onAppear {
+                text   = nodeData.text
+                detail = nodeData.detail
+                url    = nodeData.url
+                bold   = nodeData.bold
+                italic = nodeData.italic
+                type   = nodeData.type
+                if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
+                // Auto-focus label field after sheet appears
+                DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
+                    labelFocused = true
+                }
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -1721,153 +1703,58 @@ struct MashExportSheet: View {
     }
 
     private func exportPNG(transparent: Bool) {
-        let exportPxScale: CGFloat = 2.0
+        let scale: CGFloat = 2.0
         let size  = CGSize(width:1600, height:1200)
-        let theme = doc.customTheme ?? MashTheme.builtIn.first{$0.id==doc.themeId} ?? MashTheme.builtIn[0]
+        let theme = doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
 
-        UIGraphicsBeginImageContextWithOptions(size, !transparent, exportPxScale)
+        UIGraphicsBeginImageContextWithOptions(size, !transparent, scale)
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
+
+        // Background
         if !transparent {
             ctx.setFillColor(UIColor(Color(hex:theme.canvasBackground)).cgColor)
-            ctx.fill(CGRect(origin:.zero,size:size))
+            ctx.fill(CGRect(origin:.zero, size:size))
         }
 
-        let allNodes = Array(doc.nodes.values)
-        guard !allNodes.isEmpty else { UIGraphicsEndImageContext(); return }
+        let cx = size.width / 2, cy = size.height / 2
 
-        // Auto-fit: compute TRUE bounds including node dimensions (not just centers)
-        // Each node's visual footprint extends width/2 left+right, height/2 top+bottom
-        // Plus image height for nodes with attachments
-        var minX = CGFloat.infinity, maxX = -CGFloat.infinity
-        var minY = CGFloat.infinity, maxY = -CGFloat.infinity
-        for n in allNodes {
-            let hw = n.width / 2 + 20        // half width + margin
-            let imgH: CGFloat = n.imageData != nil ? 130 : 0
-            let hh = (imgH + 50) / 2 + 20    // half height + margin
-            minX = Swift.min(minX, n.x - hw)
-            maxX = Swift.max(maxX, n.x + hw)
-            minY = Swift.min(minY, n.y - hh)
-            maxY = Swift.max(maxY, n.y + hh)
-        }
-        // Extra safe padding around everything
-        let pad: CGFloat = 60
-        minX -= pad; maxX += pad; minY -= pad; maxY += pad
-        let contentW = max(1, maxX-minX), contentH = max(1, maxY-minY)
-        let s = min(size.width/contentW, size.height/contentH, 2.5)  // fit scale
-        let ox = size.width/2  - (minX+contentW/2)*s   // origin offset x
-        let oy = size.height/2 - (minY+contentH/2)*s   // origin offset y
-        // world → canvas
-        func px(_ x:CGFloat)->CGFloat { ox+x*s }
-        func py(_ y:CGFloat)->CGFloat { oy+y*s }
-        func ps(_ v:CGFloat)->CGFloat { v*s }
-
-        // Tree edges
-        for (_,node) in doc.nodes {
-            for cid in node.children {
-                guard let ch=doc.nodes[cid] else{continue}
-                let fx=px(node.x),fy=py(node.y),tx=px(ch.x),ty=py(ch.y),dx=tx-fx
-                ctx.setStrokeColor(UIColor(Color(hex:theme.connectionColor)).withAlphaComponent(0.8).cgColor)
-                ctx.setLineWidth(max(1.5,s)); ctx.setLineDash(phase:0,lengths:[])
-                ctx.move(to:CGPoint(x:fx,y:fy))
-                ctx.addCurve(to:CGPoint(x:tx,y:ty),
-                    control1:CGPoint(x:fx+dx*0.5,y:fy),
-                    control2:CGPoint(x:tx-dx*0.5,y:ty))
-                ctx.strokePath()
-            }
-        }
-        // Reference connections
-        for conn in doc.connections {
-            guard let fn=doc.nodes[conn.fromId],let tn=doc.nodes[conn.toId] else{continue}
-            let fx=px(fn.x),fy=py(fn.y),tx=px(tn.x),ty=py(tn.y),dx=tx-fx
-            let col=(conn.color.map{UIColor(Color(hex:$0))} ?? UIColor(Color(hex:theme.connectionColor)))
-                .withAlphaComponent(0.6)
-            ctx.setStrokeColor(col.cgColor)
-            ctx.setLineWidth(max(1,s*0.7))
-            ctx.setLineDash(phase:0,lengths:conn.dashed ? [8,5]:[])
-            ctx.move(to:CGPoint(x:fx,y:fy))
-            ctx.addCurve(to:CGPoint(x:tx,y:ty),
-                control1:CGPoint(x:fx+dx*0.5,y:fy),
-                control2:CGPoint(x:tx-dx*0.5,y:ty))
+        // Draw connections
+        func drawLine(from: CGPoint, to: CGPoint) {
+            ctx.setStrokeColor(UIColor(Color(hex:theme.connectionColor)).withAlphaComponent(0.7).cgColor)
+            ctx.setLineWidth(2)
+            ctx.move(to: CGPoint(x:cx+from.x, y:cy+from.y))
+            ctx.addCurve(to: CGPoint(x:cx+to.x, y:cy+to.y),
+                         control1: CGPoint(x:cx+from.x+(to.x-from.x)*0.5, y:cy+from.y),
+                         control2: CGPoint(x:cx+from.x+(to.x-from.x)*0.5, y:cy+to.y))
             ctx.strokePath()
         }
-        ctx.setLineDash(phase:0,lengths:[])
-
-        // Nodes — pixel-perfect match to MashNodeView in-app rendering
-        for n in allNodes {
-            let fillC = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
-            let bordC = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
-            let txtC  = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
-
-            // World width × fit scale (same transform used for positioning)
-            let nw = n.width * s
-
-            // Image: matches SwiftUI .resizable().scaledToFit().frame(maxWidth: nodeData.width-8)
-            var exportImg: UIImage? = nil
-            var imgRenderH: CGFloat = 0
-            let imgMaxW = (n.width - 8) * s   // same as maxWidth: nodeData.width-8 scaled
-            if let dat = n.imageData, let raw = UIImage(data: dat) {
-                // Normalize EXIF orientation
-                let img: UIImage
-                if raw.imageOrientation == .up { img = raw }
-                else {
-                    UIGraphicsBeginImageContextWithOptions(raw.size, false, raw.scale)
-                    raw.draw(in: CGRect(origin:.zero, size:raw.size))
-                    img = UIGraphicsGetImageFromCurrentImageContext() ?? raw
-                    UIGraphicsEndImageContext()
-                }
-                exportImg   = img
-                // scaledToFit: height scales proportionally to fit imgMaxW wide
-                imgRenderH  = imgMaxW * img.size.height / Swift.max(1, img.size.width)
+        for (_, node) in doc.nodes {
+            for childId in node.children {
+                guard let child = doc.nodes[childId] else { continue }
+                drawLine(from:CGPoint(x:node.x,y:node.y), to:CGPoint(x:child.x,y:child.y))
             }
-
-            // Text metrics — match SwiftUI font sizes
-            let fontSize: CGFloat
-            switch n.type {
-            case .root:     fontSize = 15 * Swift.min(s, 1.5)
-            case .main:     fontSize = 13 * Swift.min(s, 1.5)
-            case .subtitle: fontSize = 11 * Swift.min(s, 1.5)
-            default:        fontSize = 10 * Swift.min(s, 1.5)
-            }
-            let fnt = n.bold ? UIFont.boldSystemFont(ofSize:fontSize)
-                             : UIFont.systemFont(ofSize:fontSize)
-            let atr: [NSAttributedString.Key:Any] = [.font:fnt, .foregroundColor:txtC]
-            let str = NSAttributedString(string:n.text, attributes:atr)
-            // Measure wrapped text at node width (matches .padding(.horizontal,8))
-            let hPad: CGFloat = 8*Swift.min(s,1.5)
-            let vPad: CGFloat = 6*Swift.min(s,1.5)
-            let txtBounds = str.boundingRect(
-                with: CGSize(width: nw - hPad*2, height: 500),
-                options: [.usesLineFragmentOrigin,.usesFontLeading], context:nil)
-            let lblH = txtBounds.height + vPad*2
-
-            // Total node height = image area + label
-            let imgTopPad:  CGFloat = imgRenderH > 0 ? 4*Swift.min(s,1.5) : 0
-            let imgHPad:    CGFloat = imgRenderH > 0 ? 4*Swift.min(s,1.5) : 0
-            let totalImgH   = imgRenderH > 0 ? imgRenderH + imgTopPad + imgHPad : 0
-            let nh          = totalImgH + lblH
-
-            let rect = CGRect(x:px(n.x)-nw/2, y:py(n.y)-nh/2, width:nw, height:nh)
-            let cr   = 10*Swift.min(s,1.2)
-            let path = UIBezierPath(roundedRect:rect, cornerRadius:cr)
-            fillC.setFill();   path.fill()
-            bordC.setStroke(); path.lineWidth = Swift.max(1,1.5*Swift.min(s,1)); path.stroke()
-
-            // Draw image: centered horizontally, scaledToFit
-            if let img = exportImg, imgRenderH > 0 {
-                let imgX = rect.minX + (nw - imgMaxW)/2   // centered like maxWidth
-                let imgRect = CGRect(x:imgX, y:rect.minY+imgTopPad,
-                                     width:imgMaxW, height:imgRenderH)
-                ctx.saveGState()
-                UIBezierPath(roundedRect:imgRect, cornerRadius:7*Swift.min(s,1)).addClip()
-                img.draw(in:imgRect)
-                ctx.restoreGState()
-            }
-
-            // Draw label: centered below image
-            let ty = rect.minY + totalImgH + (lblH - txtBounds.height)/2
-            str.draw(in:CGRect(x:rect.minX+hPad, y:ty,
-                               width:nw-hPad*2, height:txtBounds.height+2))
         }
+
+        // Draw nodes
+        for (_, n) in doc.nodes {
+            let fill   = UIColor(Color(hex: n.fillColor   ?? (n.type == .root ? theme.rootFill   : theme.mainFill)))
+            let border = UIColor(Color(hex: n.borderColor ?? (n.type == .root ? theme.rootBorder : theme.mainBorder)))
+            let text   = UIColor(Color(hex: n.textColor   ?? (n.type == .root ? theme.rootText   : theme.mainText)))
+            let nodeW  = n.width
+            let nodeH: CGFloat = n.type == .root ? 50 : 36
+            let rect   = CGRect(x:cx+n.x-nodeW/2, y:cy+n.y-nodeH/2, width:nodeW, height:nodeH)
+            let path   = UIBezierPath(roundedRect:rect, cornerRadius:10)
+            fill.setFill(); path.fill()
+            border.setStroke(); path.lineWidth = 2; path.stroke()
+            let attrs: [NSAttributedString.Key:Any] = [
+                .font: n.bold ? UIFont.boldSystemFont(ofSize:n.fontSize ?? 12) : UIFont.systemFont(ofSize:n.fontSize ?? 10),
+                .foregroundColor: text
+            ]
+            let str = NSAttributedString(string:n.text, attributes:attrs)
+            let strSize = str.size()
+            str.draw(at:CGPoint(x:rect.midX-strSize.width/2, y:rect.midY-strSize.height/2))
+        }
+
         let img = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
 
@@ -2033,6 +1920,47 @@ struct NodeImagePickerSheet: View {
         .sheet(isPresented: $showPicker) {
             ImagePickerView(selectedImage: $pickedImage)
         }
+    }
+}
+
+// MARK: - Node Image Picker
+struct NodeImageTarget: Identifiable { let id: String }
+
+struct NodeImagePickerSheet: View {
+    let nodeId: String; let doc: MashDocument
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @Environment(\.dismiss) var dismiss
+    @State private var pickedImage: UIImage? = nil
+    @State private var showPicker  = true
+    var body: some View {
+        ZStack {
+            Color(hex:"#0d1117").ignoresSafeArea()
+            if let img = pickedImage {
+                VStack(spacing:16) {
+                    Image(uiImage:img).resizable().scaledToFit().frame(maxHeight:300).cornerRadius(12)
+                    HStack(spacing:16) {
+                        Button("Attach to Node") {
+                            var d = doc
+                            d.nodes[nodeId]?.imageData = img.jpegData(compressionQuality:0.8)
+                            MashStore.shared.updateDocument(d); dismiss()
+                        }
+                        .font(.system(size:12,weight:.semibold)).foregroundColor(.black)
+                        .padding(.horizontal,20).padding(.vertical,10)
+                        .background(themeVM.accent).cornerRadius(10)
+                        Button("Cancel") { dismiss() }
+                            .font(.system(size:12,design:.monospaced)).foregroundColor(themeVM.dim)
+                    }
+                }
+                .padding(20)
+            } else {
+                VStack(spacing:12) {
+                    ProgressView().tint(themeVM.accent)
+                    Text("Opening photo library…")
+                        .font(.system(size:11,design:.monospaced)).foregroundColor(themeVM.dim)
+                }
+            }
+        }
+        .sheet(isPresented:$showPicker) { ImagePickerView(selectedImage:$pickedImage) }
     }
 }
 
