@@ -596,7 +596,6 @@ struct MashCanvasView: View {
                         .background(Color(hex:"#161b22").opacity(0.92)).cornerRadius(6)
                         .overlay(RoundedRectangle(cornerRadius:6).stroke(themeVM.accent.opacity(0.3),lineWidth:0.5))
                     }
-                    Spacer()
                     if vm.tool == .connect || vm.tool == .connectSingle || vm.tool == .mainLink {
                         let arrow = vm.tool == .connect ? "↔" : vm.tool == .mainLink ? "—" : "→"
                         let lbl   = vm.connectionFirst == nil ? "\(arrow) Tap source" : "\(arrow) Tap target"
@@ -632,7 +631,6 @@ struct MashCanvasView: View {
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
                 .background(.ultraThinMaterial)
-                Spacer()
                 HStack {
                     Spacer()
                     Text("\(Int(vm.scale*100))%")
