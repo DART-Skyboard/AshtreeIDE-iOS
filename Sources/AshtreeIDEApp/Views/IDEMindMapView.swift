@@ -674,6 +674,8 @@ struct MashSideToolbar: View {
     @Binding var showLoadFromEditor:  Bool
     let onBuildRun: () -> Void
     @EnvironmentObject var themeVM: IDEThemeViewModel
+    @State private var toolbarScrollOffset: CGFloat = 0
+    @State private var toolbarDragStart:    CGFloat = 0
 
     struct ToolItem: Identifiable {
         let id = UUID()
