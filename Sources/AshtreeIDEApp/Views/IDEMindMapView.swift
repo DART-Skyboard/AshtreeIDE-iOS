@@ -585,6 +585,15 @@ struct MashCanvasView: View {
             MashCanvas(doc: doc, vm: vm)
                 .environmentObject(themeVM)
 
+            MashSideToolbar(doc: doc, vm: vm,
+                showThemePicker:    $showThemePicker,
+                showExport:         $showExport,
+                showDocList:        $showDocList,
+                showNewDoc:         $showNewDoc,
+                showLoadFromEditor: $showLoadFromEditor,
+                onBuildRun:         { buildAndRunMash() })
+                .environmentObject(themeVM)
+
             VStack {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
@@ -596,6 +605,7 @@ struct MashCanvasView: View {
                         .background(Color(hex:"#161b22").opacity(0.92)).cornerRadius(6)
                         .overlay(RoundedRectangle(cornerRadius:6).stroke(themeVM.accent.opacity(0.3),lineWidth:0.5))
                     }
+                    Spacer()
                     if vm.tool == .connect || vm.tool == .connectSingle || vm.tool == .mainLink {
                         let arrow = vm.tool == .connect ? "↔" : vm.tool == .mainLink ? "—" : "→"
                         let lbl   = vm.connectionFirst == nil ? "\(arrow) Tap source" : "\(arrow) Tap target"
@@ -642,18 +652,7 @@ struct MashCanvasView: View {
             }
         }
         .ignoresSafeArea(edges:.bottom)
-        // Toolbar as overlay — sits on top visually but doesn't block canvas gestures
-        .overlay(
-            MashSideToolbar(doc: doc, vm: vm,
-                showThemePicker:    $showThemePicker,
-                showExport:         $showExport,
-                showDocList:        $showDocList,
-                showNewDoc:         $showNewDoc,
-                showLoadFromEditor: $showLoadFromEditor,
-                onBuildRun:         { buildAndRunMash() })
-                .environmentObject(themeVM)
-                .allowsHitTesting(true)
-        )
+
         .sheet(isPresented: $showThemePicker) {
             MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
         }
@@ -768,17 +767,12 @@ struct MashSideToolbar: View {
         GeometryReader { geo in
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
             // Toolbar content — fixedSize so it only takes content dimensions
+            // Plain VStack/HStack — NO ScrollView (ScrollView steals DragGestures and kills pan)
             Group {
                 if isVertical {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing:2) { toolItems() }
-                    }
-                    .frame(width: 50, height: Swift.min(CGFloat(items.count) * 42, geo.size.height * 0.75))
+                    VStack(spacing:1) { toolItems() }
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing:2) { toolItems() }
-                    }
-                    .frame(width: Swift.min(CGFloat(items.count) * 42, geo.size.width * 0.75), height: 50)
+                    HStack(spacing:1) { toolItems() }
                 }
             }
             .padding(6)
@@ -821,11 +815,11 @@ struct MashSideToolbar: View {
     private func toolItems() -> some View {
         ForEach(items) { item in
             Button(action:item.action) {
-                Image(systemName:item.icon).font(.system(size:16))
+                Image(systemName:item.icon).font(.system(size:13))
                     .foregroundColor(isActive(item.icon) ? .black : themeVM.dim)
-                    .frame(width:38,height:38)
+                    .frame(width:32,height:32)
                     .background(isActive(item.icon) ? themeVM.accent : themeVM.accent.opacity(0.06))
-                    .cornerRadius(9)
+                    .cornerRadius(8)
             }.buttonStyle(.plain)
         }
     }
