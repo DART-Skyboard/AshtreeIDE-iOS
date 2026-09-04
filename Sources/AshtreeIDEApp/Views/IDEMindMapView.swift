@@ -1924,44 +1924,5 @@ struct NodeImagePickerSheet: View {
 }
 
 // MARK: - Node Image Picker
-struct NodeImageTarget: Identifiable { let id: String }
-
-struct NodeImagePickerSheet: View {
-    let nodeId: String; let doc: MashDocument
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-    @Environment(\.dismiss) var dismiss
-    @State private var pickedImage: UIImage? = nil
-    @State private var showPicker  = true
-    var body: some View {
-        ZStack {
-            Color(hex:"#0d1117").ignoresSafeArea()
-            if let img = pickedImage {
-                VStack(spacing:16) {
-                    Image(uiImage:img).resizable().scaledToFit().frame(maxHeight:300).cornerRadius(12)
-                    HStack(spacing:16) {
-                        Button("Attach to Node") {
-                            var d = doc
-                            d.nodes[nodeId]?.imageData = img.jpegData(compressionQuality:0.8)
-                            MashStore.shared.updateDocument(d); dismiss()
-                        }
-                        .font(.system(size:12,weight:.semibold)).foregroundColor(.black)
-                        .padding(.horizontal,20).padding(.vertical,10)
-                        .background(themeVM.accent).cornerRadius(10)
-                        Button("Cancel") { dismiss() }
-                            .font(.system(size:12,design:.monospaced)).foregroundColor(themeVM.dim)
-                    }
-                }
-                .padding(20)
-            } else {
-                VStack(spacing:12) {
-                    ProgressView().tint(themeVM.accent)
-                    Text("Opening photo library…")
-                        .font(.system(size:11,design:.monospaced)).foregroundColor(themeVM.dim)
-                }
-            }
-        }
-        .sheet(isPresented:$showPicker) { ImagePickerView(selectedImage:$pickedImage) }
-    }
-}
 
 // ShareSheet is defined in IDEMainView.swift
