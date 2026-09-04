@@ -601,6 +601,35 @@ struct MashCanvasView: View {
 
             headerBar
         }
+        // Unified gesture: drag starting in toolbar area scrolls toolbar,
+        // drag starting on canvas pans the canvas — no competing gestures
+        .gesture(
+            DragGesture(minimumDistance:4, coordinateSpace:.local)
+                .onChanged { val in
+                    if dragIsToolbar == nil {
+                        dragIsToolbar = val.startLocation.x < 72
+                    }
+                    if dragIsToolbar == true {
+                        let total = CGFloat(toolbarItemCount) * 42
+                        let maxH  = UIScreen.main.bounds.height * 0.7
+                        let raw   = tbScrollBase + val.translation.height
+                        tbScrollOffset = total > maxH
+                            ? Swift.min(0, Swift.max(-(total-maxH), raw)) : 0
+                    } else if !vm.isDraggingNode {
+                        let dx = val.translation.width  - vm.lastPanTranslation.x
+                        let dy = val.translation.height - vm.lastPanTranslation.y
+                        vm.offset = CGPoint(x: vm.offset.x + dx/vm.scale,
+                                            y: vm.offset.y + dy/vm.scale)
+                        vm.lastPanTranslation = CGPoint(x: val.translation.width,
+                                                         y: val.translation.height)
+                    }
+                }
+                .onEnded { _ in
+                    if dragIsToolbar == true { tbScrollBase = tbScrollOffset }
+                    dragIsToolbar         = nil
+                    vm.lastPanTranslation = .zero
+                }
+        )
         .ignoresSafeArea(edges:.bottom)
         .sheet(isPresented: $showThemePicker) {
             MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
@@ -722,6 +751,7 @@ struct MashSideToolbar: View {
     @Binding var showDocList:         Bool
     @Binding var showNewDoc:          Bool
     @Binding var showLoadFromEditor:  Bool
+    let scrollOffset: CGFloat
     let onBuildRun: () -> Void
     @EnvironmentObject var themeVM: IDEThemeViewModel
 
@@ -947,48 +977,29 @@ struct MashCanvas: View {
                 .clipped()
                 // Pan as simultaneousGesture: fires alongside node gestures,
                 // blocked only when isDraggingNode is true
-                .simultaneousGesture(
-                    DragGesture(minimumDistance:1, coordinateSpace:.local)
+                                .simultaneousGesture(
+                    DragGesture(minimumDistance:6, coordinateSpace:.local)
                         .onChanged { val in
-                            guard !vm.isDraggingNode else { return }
-                            if vm.tool == .marquee {
-                                if vm.marqueeStart == nil {
-                                    vm.marqueeStart    = val.startLocation
-                                    vm.isMarqueeActive = true
-                                }
-                                vm.marqueeEnd = val.location
-                            } else {
-                                let dx = val.translation.width  - vm.lastPanTranslation.x
-                                let dy = val.translation.height - vm.lastPanTranslation.y
-                                vm.offset = CGPoint(
-                                    x: vm.offset.x + dx / vm.scale,
-                                    y: vm.offset.y + dy / vm.scale)
-                                vm.lastPanTranslation = CGPoint(
-                                    x: val.translation.width,
-                                    y: val.translation.height)
+                            guard !vm.isDraggingNode, vm.tool == .marquee else { return }
+                            if vm.marqueeStart == nil {
+                                vm.marqueeStart = val.startLocation; vm.isMarqueeActive = true
                             }
+                            vm.marqueeEnd = val.location
                         }
                         .onEnded { _ in
-                            vm.lastPanTranslation = .zero
                             if vm.isMarqueeActive,
-                               let ms = vm.marqueeStart,
-                               let me = vm.marqueeEnd {
-                                let rect = CGRect(
-                                    x: Swift.min(ms.x, me.x),
-                                    y: Swift.min(ms.y, me.y),
-                                    width:  abs(me.x-ms.x),
-                                    height: abs(me.y-ms.y))
+                               let ms = vm.marqueeStart, let me = vm.marqueeEnd {
+                                let rect = CGRect(x:Swift.min(ms.x,me.x),y:Swift.min(ms.y,me.y),
+                                                  width:abs(me.x-ms.x),height:abs(me.y-ms.y))
                                 var hits = Set<String>()
                                 for (_,n) in doc.nodes {
-                                    let sp = vm.worldToScreen(CGPoint(x:n.x, y:n.y), sz:sz)
+                                    let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                                     if rect.contains(sp) { hits.insert(n.id) }
                                 }
-                                vm.selectedIds = hits
-                                vm.selectedId  = hits.count == 1 ? hits.first : nil
+                                vm.selectedIds=hits
+                                vm.selectedId=hits.count==1 ? hits.first : nil
                             }
-                            vm.marqueeStart    = nil
-                            vm.marqueeEnd      = nil
-                            vm.isMarqueeActive = false
+                            vm.marqueeStart=nil; vm.marqueeEnd=nil; vm.isMarqueeActive=false
                         }
                 )
 
