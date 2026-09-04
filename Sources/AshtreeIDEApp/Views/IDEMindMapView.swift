@@ -575,6 +575,10 @@ struct MashCanvasView: View {
     @EnvironmentObject var ideVM:    IDEState
     @State private var showNodeEditor     = false
     @State private var showThemePicker    = false
+    // Unified drag: tracks toolbar scroll + canvas pan in one gesture
+    @State private var tbScrollOffset:    CGFloat = 0
+    @State private var tbScrollBase:      CGFloat = 0
+    @State private var dragIsToolbar:     Bool?   = nil
     @State private var showExport         = false
     @State private var showDocList        = false
     @State private var showNewDoc         = false
@@ -591,6 +595,7 @@ struct MashCanvasView: View {
                 showDocList:        $showDocList,
                 showNewDoc:         $showNewDoc,
                 showLoadFromEditor: $showLoadFromEditor,
+                scrollOffset:       tbScrollOffset,
                 onBuildRun:         { buildAndRunMash() })
                 .environmentObject(themeVM)
 
@@ -692,6 +697,12 @@ struct MashCanvasView: View {
             }
     }
 
+    // Number of toolbar items for scroll calculation
+    private var toolbarItemCount: Int {
+        // Count items defined in MashSideToolbar.items
+        return 22 // update if items change
+    }
+
     private func buildAndRunMash() {
         let code = MashAshCodeGenerator.toAshSource(doc)
         ideVM.sourceCode  = code
@@ -755,9 +766,23 @@ struct MashSideToolbar: View {
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
             Group {
                 if isVertical {
+                    let total = CGFloat(items.count)*42
+                    let maxH  = geo.size.height*0.72
                     VStack(spacing:2) { toolItems() }
+                        .offset(y: total > maxH
+                            ? Swift.min(0, Swift.max(-(total-maxH), scrollOffset))
+                            : 0)
+                        .frame(width:42, height:Swift.min(total,maxH), alignment:.top)
+                        .clipped()
                 } else {
+                    let total = CGFloat(items.count)*42
+                    let maxW  = geo.size.width*0.72
                     HStack(spacing:2) { toolItems() }
+                        .offset(x: total > maxW
+                            ? Swift.min(0, Swift.max(-(total-maxW), scrollOffset))
+                            : 0)
+                        .frame(width:Swift.min(total,maxW), height:42, alignment:.leading)
+                        .clipped()
                 }
             }
             .padding(6)
