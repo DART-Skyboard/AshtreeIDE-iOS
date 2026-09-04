@@ -1051,7 +1051,7 @@ struct MashCanvas: View {
 
     // ── Node drag — start from world pos to avoid drift ──
     private func nodeDrag(_ n:MashNodeData, sz:CGSize) -> some Gesture {
-        DragGesture(minimumDistance:5, coordinateSpace:.global)
+        DragGesture(minimumDistance:5, coordinateSpace:.local)
             .onChanged { val in
                 guard vm.tool == .select else { return }
                 if !vm.isDraggingNode {
