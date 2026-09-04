@@ -631,6 +631,7 @@ struct MashCanvasView: View {
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
                 .background(.ultraThinMaterial)
+                .allowsHitTesting(true)
                 HStack {
                     Spacer()
                     Text("\(Int(vm.scale*100))%")
@@ -640,6 +641,9 @@ struct MashCanvasView: View {
                     Spacer()
                 }.padding(.bottom,8)
             }
+            .frame(maxWidth:.infinity, maxHeight:.infinity, alignment:.top)
+            .allowsHitTesting(false)
+
         }
         .ignoresSafeArea(edges:.bottom)
         // Toolbar as overlay — sits on top visually but doesn't block canvas gestures
