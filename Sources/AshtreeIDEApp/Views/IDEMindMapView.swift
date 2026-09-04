@@ -585,15 +585,6 @@ struct MashCanvasView: View {
             MashCanvas(doc: doc, vm: vm)
                 .environmentObject(themeVM)
 
-            MashSideToolbar(doc: doc, vm: vm,
-                showThemePicker:    $showThemePicker,
-                showExport:         $showExport,
-                showDocList:        $showDocList,
-                showNewDoc:         $showNewDoc,
-                showLoadFromEditor: $showLoadFromEditor,
-                onBuildRun:         { buildAndRunMash() })
-                .environmentObject(themeVM)
-
             VStack {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
@@ -653,6 +644,18 @@ struct MashCanvasView: View {
             }
         }
         .ignoresSafeArea(edges:.bottom)
+        // Toolbar as overlay — sits on top visually but doesn't block canvas gestures
+        .overlay(
+            MashSideToolbar(doc: doc, vm: vm,
+                showThemePicker:    $showThemePicker,
+                showExport:         $showExport,
+                showDocList:        $showDocList,
+                showNewDoc:         $showNewDoc,
+                showLoadFromEditor: $showLoadFromEditor,
+                onBuildRun:         { buildAndRunMash() })
+                .environmentObject(themeVM)
+                .allowsHitTesting(true)
+        )
         .sheet(isPresented: $showThemePicker) {
             MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
         }
@@ -766,17 +769,18 @@ struct MashSideToolbar: View {
     var body: some View {
         GeometryReader { geo in
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
+            // Toolbar content — fixedSize so it only takes content dimensions
             Group {
                 if isVertical {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing:2) { toolItems() }
                     }
-                    .frame(maxHeight: geo.size.height * 0.75)
+                    .frame(width: 50, height: Swift.min(CGFloat(items.count) * 42, geo.size.height * 0.75))
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing:2) { toolItems() }
                     }
-                    .frame(maxWidth: geo.size.width * 0.75)
+                    .frame(width: Swift.min(CGFloat(items.count) * 42, geo.size.width * 0.75), height: 50)
                 }
             }
             .padding(6)
