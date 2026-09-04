@@ -537,6 +537,7 @@ struct MashCanvasView: View {
     @StateObject private var vm     = MashCanvasVM()
     @EnvironmentObject var ideVM:    IDEState
     @State private var showNodeEditor     = false
+    @State private var editorNodeId: String? = nil
     @State private var showThemePicker    = false
     @State private var showExport         = false
     @State private var showDocList        = false
@@ -584,9 +585,9 @@ struct MashCanvasView: View {
             NodeImagePickerSheet(nodeId: target.id, doc: doc)
                 .environmentObject(themeVM)
         }
-        .sheet(isPresented: Binding(get:{vm.showNodeEditor},set:{vm.showNodeEditor=$0})) {
-            if let id=vm.editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ vm.showNodeEditor=false })
+        .sheet(isPresented: $showNodeEditor) {
+            if let id=editorNodeId ?? vm.selectedId, let n=doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n, doc:doc, onDismiss:{ showNodeEditor=false })
                     .environmentObject(themeVM)
             }
         }
