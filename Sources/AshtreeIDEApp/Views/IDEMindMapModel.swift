@@ -17,15 +17,16 @@ public enum MashNodeType: String, Codable, CaseIterable {
     case category   = "category"    // Group label
     case note       = "note"        // Information leaf
     case image      = "image"       // Image node
-    case link        = "link"
-    // ASH coding template nodes
-    case ashCode     = "ash_code"
-    case outTerminal = "out_terminal"
-    case out2D       = "out_2d"
-    case out3D       = "out_3d"
-    case inputForm   = "input_form"
-    case outputForm  = "output_form"
-    case returnNode  = "return"
+    case link       = "link"        // Hyperlink node
+    // ASH coding template node types
+    case ashCode    = "ash_code"    // ASH syntax code block
+    case outTerminal = "out_terminal" // Terminal/CLI output
+    case out2D      = "out_2d"      // 2D canvas / vector output
+    case out3D      = "out_3d"      // 3D scene / WebGL output
+    case inputForm  = "input_form"  // User input form node
+    case outputForm = "output_form" // Output display form node
+    case returnNode = "return"      // Return/result node
+
 
     public var defaultRadius: CGFloat {
         switch self {
@@ -648,6 +649,8 @@ public struct MashAshCodeGenerator {
                 }
             case .image:
                 lines.append("\(indent)// [image node: \(text)]")
+            default:
+                lines.append("\(indent)// \(text)")
             }
 
             // Process children
