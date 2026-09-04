@@ -585,6 +585,15 @@ struct MashCanvasView: View {
             MashCanvas(doc: doc, vm: vm)
                 .environmentObject(themeVM)
 
+            MashSideToolbar(doc: doc, vm: vm,
+                showThemePicker:    $showThemePicker,
+                showExport:         $showExport,
+                showDocList:        $showDocList,
+                showNewDoc:         $showNewDoc,
+                showLoadFromEditor: $showLoadFromEditor,
+                onBuildRun:         { buildAndRunMash() })
+                .environmentObject(themeVM)
+
             VStack {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
@@ -596,6 +605,7 @@ struct MashCanvasView: View {
                         .background(Color(hex:"#161b22").opacity(0.92)).cornerRadius(6)
                         .overlay(RoundedRectangle(cornerRadius:6).stroke(themeVM.accent.opacity(0.3),lineWidth:0.5))
                     }
+                    Spacer()
                     if vm.tool == .connect || vm.tool == .connectSingle || vm.tool == .mainLink {
                         let arrow = vm.tool == .connect ? "↔" : vm.tool == .mainLink ? "—" : "→"
                         let lbl   = vm.connectionFirst == nil ? "\(arrow) Tap source" : "\(arrow) Tap target"
@@ -631,7 +641,7 @@ struct MashCanvasView: View {
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
                 .background(.ultraThinMaterial)
-                .allowsHitTesting(true)
+                Spacer()
                 HStack {
                     Spacer()
                     Text("\(Int(vm.scale*100))%")
@@ -641,23 +651,8 @@ struct MashCanvasView: View {
                     Spacer()
                 }.padding(.bottom,8)
             }
-            .frame(maxWidth:.infinity, maxHeight:.infinity, alignment:.top)
-            .allowsHitTesting(false)
-
         }
         .ignoresSafeArea(edges:.bottom)
-        // Toolbar as overlay — sits on top visually but doesn't block canvas gestures
-        .overlay(
-            MashSideToolbar(doc: doc, vm: vm,
-                showThemePicker:    $showThemePicker,
-                showExport:         $showExport,
-                showDocList:        $showDocList,
-                showNewDoc:         $showNewDoc,
-                showLoadFromEditor: $showLoadFromEditor,
-                onBuildRun:         { buildAndRunMash() })
-                .environmentObject(themeVM)
-                .allowsHitTesting(true)
-        )
         .sheet(isPresented: $showThemePicker) {
             MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
         }
@@ -682,16 +677,14 @@ struct MashCanvasView: View {
             NodeImagePickerSheet(nodeId: target.id, doc: doc)
                 .environmentObject(themeVM)
         }
-        // Node editor — driven by vm.showNodeEditor (set from context menu or double-tap)
-        .sheet(isPresented: Binding(
-            get: { vm.showNodeEditor },
-            set: { vm.showNodeEditor = $0 }
-        )) {
-            if let id = vm.editorNodeId ?? vm.selectedId, let n = doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n, doc:doc,
-                    onDismiss: { vm.showNodeEditor = false })
+        .sheet(isPresented: $showNodeEditor) {
+            if let id=vm.selectedId, let n=doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n,doc:doc,isPresented:$showNodeEditor)
                     .environmentObject(themeVM)
             }
+        }
+        .onChange(of: vm.contextNodeId) { id in
+            if id != nil && vm.showContextMenu == false { showNodeEditor = true }
         }
     }
 
@@ -716,8 +709,6 @@ struct MashSideToolbar: View {
     @Binding var showLoadFromEditor:  Bool
     let onBuildRun: () -> Void
     @EnvironmentObject var themeVM: IDEThemeViewModel
-    @State private var tbOffset:   CGFloat = 0
-    @State private var tbDragBase: CGFloat = 0
 
     struct ToolItem: Identifiable {
         let id = UUID()
@@ -744,14 +735,6 @@ struct MashSideToolbar: View {
         ToolItem(icon:"paintpalette.fill")           { showThemePicker = true },
         // Image node
         ToolItem(icon:"photo.badge.plus")            { vm.addImageNode(doc:doc) },
-        // ASH coding node types (always available, especially useful in ASH template)
-        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addASHNode(doc:doc, type:.ashCode) },
-        ToolItem(icon:"terminal")                { vm.addASHNode(doc:doc, type:.outTerminal) },
-        ToolItem(icon:"rectangle.on.rectangle")  { vm.addASHNode(doc:doc, type:.out2D) },
-        ToolItem(icon:"cube")                    { vm.addASHNode(doc:doc, type:.out3D) },
-        ToolItem(icon:"arrow.down.to.line")      { vm.addASHNode(doc:doc, type:.inputForm) },
-        ToolItem(icon:"arrow.up.from.line")      { vm.addASHNode(doc:doc, type:.outputForm) },
-        ToolItem(icon:"arrowshape.turn.up.left") { vm.addASHNode(doc:doc, type:.returnNode) },
         // Export
         ToolItem(icon:"square.and.arrow.up")         { showExport = true },
         // Load code into map
@@ -761,49 +744,16 @@ struct MashSideToolbar: View {
         // New map / Open map
         ToolItem(icon:"plus.square.on.square")       { showNewDoc = true },
         ToolItem(icon:"folder.fill")                 { showDocList = true },
-        // ASH coding nodes
-        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addAshNode(doc:doc, type:.ashCode)   },
-        ToolItem(icon:"arrow.down.to.line")          { vm.addAshNode(doc:doc, type:.inputForm)  },
-        ToolItem(icon:"terminal")                    { vm.addAshNode(doc:doc, type:.outputForm)  },
-        ToolItem(icon:"rectangle.on.rectangle")      { vm.addAshNode(doc:doc, type:.out2D)      },
-        ToolItem(icon:"cube.transparent")            { vm.addAshNode(doc:doc, type:.out3D)      },
-        ToolItem(icon:"arrow.uturn.backward.circle") { vm.addAshNode(doc:doc, type:.returnNode)  },
     ]}
 
     var body: some View {
         GeometryReader { geo in
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
-            // Toolbar content — fixedSize so it only takes content dimensions
             Group {
                 if isVertical {
-                    let maxH = Swift.min(CGFloat(items.count)*42, geo.size.height*0.75)
-                    let totH = CGFloat(items.count)*42
-                    let clampV = totH > maxH ? Swift.min(0,Swift.max(-(totH-maxH),tbOffset)) : 0
                     VStack(spacing:2) { toolItems() }
-                        .offset(y:clampV)
-                        .frame(width:42, height:maxH, alignment:.top)
-                        .clipped()
-                        .gesture(DragGesture(minimumDistance:4)
-                            .onChanged{v in tbOffset=tbDragBase+v.translation.height}
-                            .onEnded{v in
-                                let t=CGFloat(items.count)*42,m=geo.size.height*0.75
-                                tbOffset=Swift.min(0,Swift.max(-(t-m),tbDragBase+v.translation.height))
-                                tbDragBase=tbOffset})
                 } else {
-                    let maxW = Swift.min(CGFloat(items.count)*42, geo.size.width*0.75)
-                    let totW = CGFloat(items.count)*42
-                    let clampH = totW > maxW ? Swift.min(0,Swift.max(-(totW-maxW),tbOffset)) : 0
                     HStack(spacing:2) { toolItems() }
-                        .offset(x:clampH)
-                        .frame(width:maxW, height:42, alignment:.leading)
-                        .clipped()
-                        .gesture(DragGesture(minimumDistance:4)
-                            .onChanged{v in tbOffset=tbDragBase+v.translation.width}
-                            .onEnded{v in
-                                let t=CGFloat(items.count)*42,m=geo.size.width*0.75
-                                tbOffset=Swift.min(0,Swift.max(-(t-m),tbDragBase+v.translation.width))
-                                tbDragBase=tbOffset})
-                    .frame(width: Swift.min(CGFloat(items.count) * 42, geo.size.width * 0.75), height: 50)
                 }
             }
             .padding(6)
@@ -857,10 +807,10 @@ struct MashSideToolbar: View {
 
     private func isActive(_ icon: String) -> Bool {
         switch icon {
-        case "cursorarrow":                 return vm.tool == .select
-        case "line.diagonal":               return vm.tool == .mainLink
-        case "arrow.left.and.right":        return vm.tool == .connect
-        case "arrow.right":                 return vm.tool == .connectSingle
+        case "cursorarrow":                return vm.tool == .select
+        case "line.diagonal":              return vm.tool == .mainLink
+        case "arrow.left.and.right":       return vm.tool == .connect
+        case "arrow.right":                return vm.tool == .connectSingle
         case "rectangle.dashed.badge.plus": return vm.tool == .marquee
         default: return false
         }
