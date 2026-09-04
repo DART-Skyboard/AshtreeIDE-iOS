@@ -772,14 +772,33 @@ struct MashSideToolbar: View {
             // Toolbar content — fixedSize so it only takes content dimensions
             Group {
                 if isVertical {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing:2) { toolItems() }
-                    }
-                    .frame(width: 50, height: Swift.min(CGFloat(items.count) * 42, geo.size.height * 0.75))
+                    let maxH = Swift.min(CGFloat(items.count)*42, geo.size.height*0.75)
+                    let totH = CGFloat(items.count)*42
+                    let clampV = totH > maxH ? Swift.min(0,Swift.max(-(totH-maxH),tbOffset)) : 0
+                    VStack(spacing:2) { toolItems() }
+                        .offset(y:clampV)
+                        .frame(width:42, height:maxH, alignment:.top)
+                        .clipped()
+                        .gesture(DragGesture(minimumDistance:4)
+                            .onChanged{v in tbOffset=tbDragBase+v.translation.height}
+                            .onEnded{v in
+                                let t=CGFloat(items.count)*42,m=geo.size.height*0.75
+                                tbOffset=Swift.min(0,Swift.max(-(t-m),tbDragBase+v.translation.height))
+                                tbDragBase=tbOffset})
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing:2) { toolItems() }
-                    }
+                    let maxW = Swift.min(CGFloat(items.count)*42, geo.size.width*0.75)
+                    let totW = CGFloat(items.count)*42
+                    let clampH = totW > maxW ? Swift.min(0,Swift.max(-(totW-maxW),tbOffset)) : 0
+                    HStack(spacing:2) { toolItems() }
+                        .offset(x:clampH)
+                        .frame(width:maxW, height:42, alignment:.leading)
+                        .clipped()
+                        .gesture(DragGesture(minimumDistance:4)
+                            .onChanged{v in tbOffset=tbDragBase+v.translation.width}
+                            .onEnded{v in
+                                let t=CGFloat(items.count)*42,m=geo.size.width*0.75
+                                tbOffset=Swift.min(0,Swift.max(-(t-m),tbDragBase+v.translation.width))
+                                tbDragBase=tbOffset})
                     .frame(width: Swift.min(CGFloat(items.count) * 42, geo.size.width * 0.75), height: 50)
                 }
             }
