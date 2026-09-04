@@ -950,12 +950,12 @@ struct MashCanvas: View {
                 }
                 .frame(width:sz.width,height:sz.height)
                 .clipped()
-                // Pan + marquee: .global coord space, gated by isDraggingNode
+                // Pan as simultaneousGesture: fires alongside node gestures,
+                // blocked only when isDraggingNode is true
                 .simultaneousGesture(
-                    DragGesture(minimumDistance:6, coordinateSpace:.global)
+                    DragGesture(minimumDistance:1, coordinateSpace:.local)
                         .onChanged { val in
-                            // Gate on both isDraggingNode and draggingId
-                            guard !vm.isDraggingNode, vm.draggingId == nil else { return }
+                            guard !vm.isDraggingNode else { return }
                             if vm.tool == .marquee {
                                 if vm.marqueeStart == nil {
                                     vm.marqueeStart    = val.startLocation
@@ -975,22 +975,25 @@ struct MashCanvas: View {
                         }
                         .onEnded { _ in
                             vm.lastPanTranslation = .zero
-                            vm.isDraggingNode = false  // safety reset
                             if vm.isMarqueeActive,
                                let ms = vm.marqueeStart,
                                let me = vm.marqueeEnd {
                                 let rect = CGRect(
-                                    x: Swift.min(ms.x,me.x), y: Swift.min(ms.y,me.y),
-                                    width: abs(me.x-ms.x),   height: abs(me.y-ms.y))
+                                    x: Swift.min(ms.x, me.x),
+                                    y: Swift.min(ms.y, me.y),
+                                    width:  abs(me.x-ms.x),
+                                    height: abs(me.y-ms.y))
                                 var hits = Set<String>()
                                 for (_,n) in doc.nodes {
-                                    let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
+                                    let sp = vm.worldToScreen(CGPoint(x:n.x, y:n.y), sz:sz)
                                     if rect.contains(sp) { hits.insert(n.id) }
                                 }
                                 vm.selectedIds = hits
                                 vm.selectedId  = hits.count == 1 ? hits.first : nil
                             }
-                            vm.marqueeStart=nil; vm.marqueeEnd=nil; vm.isMarqueeActive=false
+                            vm.marqueeStart    = nil
+                            vm.marqueeEnd      = nil
+                            vm.isMarqueeActive = false
                         }
                 )
 
