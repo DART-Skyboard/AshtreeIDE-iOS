@@ -176,28 +176,7 @@ class MashCanvasVM: ObservableObject {
     }
 
     // Delete a specific reference connection
-    func deleteConnection(_ id: String, doc: MashDocument) {
-        var d = doc
-        d.connections.removeAll { $0.id == id }
-        store.updateDocument(d)
-        selectedConnId = nil; showConnMenu = false
-    }
 
-    // Add a free-standing node (no parent link — user links manually)
-    func addFreeNode(doc: MashDocument) {
-        var d = doc
-        let newId = UUID().uuidString
-        let cx = (d.nodes.values.map { $0.x }.reduce(0,+) / CGFloat(max(1, d.nodes.count))) + 120
-        let cy = (d.nodes.values.map { $0.y }.reduce(0,+) / CGFloat(max(1, d.nodes.count))) + 120
-        let node = MashNodeData(id:newId, type:.main, text:"New Node",
-            detail:"", url:"", imageData:nil,
-            x:cx, y:cy, width:130, children:[], parentId:nil,
-            collapsed:false, fillColor:nil, borderColor:nil,
-            textColor:nil, cornerStyle:nil, fontSize:nil, bold:false, italic:false)
-        d.nodes[newId] = node
-        store.updateDocument(d)
-        selectedId = newId
-    }
 
     func handleNodeTap(_ id: String, doc: MashDocument) {
         showContextMenu = false; showConnMenu = false; selectedConnId = nil
