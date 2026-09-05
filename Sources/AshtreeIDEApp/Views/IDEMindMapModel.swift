@@ -485,7 +485,13 @@ public final class MashStore: ObservableObject {
         return !(undoStacks[id]?.isEmpty ?? true)
     }
 
+    public func canRedo(_ docId: String?) -> Bool {
+        guard let id = docId else { return false }
+        return !(redoStacks[id]?.isEmpty ?? true)
+    }
+
     public var canUndo: Bool { canUndo(activeDocId) }
+    public var canRedo: Bool { canRedo(activeDocId) }
 
     /// Step back one action. Each press walks further back through history.
     @discardableResult
