@@ -400,7 +400,7 @@ public final class MashStore: ObservableObject {
     private let storageKey = "mash_documents_v1"
     private let activeKey  = "mash_active_doc"
 
-    private init() { load() }
+    private init() { load(); loadHistory() }
 
     public var activeDoc: MashDocument? {
         guard let id = activeDocId else { return nil }
@@ -439,30 +439,63 @@ public final class MashStore: ObservableObject {
         save()
     }
 
-    // ── Unlimited undo history ───────────────────────────
-    private var undoStack: [MashDocument] = []
+    // ── Undo history: per-document, persisted, multi-step ──
+    private var undoStacks: [String: [MashDocument]] = [:]
+    private let undoKey = "mash_undo_v2"
+    private let undoCap = 60
 
-    /// Snapshot the CURRENT state before a mutation. Call before changing.
-    public func pushHistory(_ doc: MashDocument) {
-        undoStack.append(doc)
+    /// Bumped on every history change so SwiftUI refreshes the undo button.
+    @Published public private(set) var undoTick: Int = 0
+
+    private func loadHistory() {
+        guard let data = UserDefaults.standard.data(forKey: undoKey),
+              let s = try? JSONDecoder().decode([String:[MashDocument]].self, from: data)
+        else { return }
+        undoStacks = s
     }
 
-    public var canUndo: Bool { !undoStack.isEmpty }
+    private func saveHistory() {
+        if let data = try? JSONEncoder().encode(undoStacks) {
+            UserDefaults.standard.set(data, forKey: undoKey)
+        }
+    }
 
-    /// Restore the most recent snapshot. Returns false when history is empty.
+    /// Snapshot the CURRENT state before mutating. Call before every change.
+    public func pushHistory(_ doc: MashDocument) {
+        var stack = undoStacks[doc.id] ?? []
+        stack.append(doc)
+        if stack.count > undoCap { stack.removeFirst(stack.count - undoCap) }
+        undoStacks[doc.id] = stack
+        undoTick &+= 1
+        saveHistory()
+    }
+
+    public func canUndo(_ docId: String?) -> Bool {
+        guard let id = docId else { return false }
+        return !(undoStacks[id]?.isEmpty ?? true)
+    }
+
+    public var canUndo: Bool { canUndo(activeDocId) }
+
+    /// Step back one action. Each press walks further back through history.
     @discardableResult
     public func undo() -> Bool {
-        guard let prev = undoStack.popLast() else { return false }
+        guard let id = activeDocId,
+              var stack = undoStacks[id],
+              let prev = stack.popLast() else { return false }
+        undoStacks[id] = stack
         if let idx = documents.firstIndex(where: { $0.id == prev.id }) {
             var d = prev; d.modified = Date().timeIntervalSince1970
             documents[idx] = d
-            save()
-            return true
         }
-        return false
+        undoTick &+= 1
+        saveHistory(); save()
+        return true
     }
 
-    public func clearHistory() { undoStack.removeAll() }
+    public func clearHistory() {
+        undoStacks.removeAll(); undoTick &+= 1; saveHistory()
+    }
 
     public func updateDocument(_ doc: MashDocument) {
         if let idx = documents.firstIndex(where: { $0.id == doc.id }) {
