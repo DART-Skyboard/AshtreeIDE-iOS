@@ -578,7 +578,11 @@ struct MashCanvasView: View {
     // Unified drag: tracks toolbar scroll + canvas pan in one gesture
     @State private var tbScrollOffset:    CGFloat = 0
     @State private var tbScrollBase:      CGFloat = 0
+    @State private var tbScrollOffsetX:   CGFloat = 0
+    @State private var tbScrollBaseX:     CGFloat = 0
     @State private var dragIsToolbar:     Bool?   = nil
+    // Pan accumulator — @State so it persists reliably across gesture frames
+    @State private var panLast:           CGPoint = .zero
     @State private var showExport         = false
     @State private var showDocList        = false
     @State private var showNewDoc         = false
@@ -596,6 +600,7 @@ struct MashCanvasView: View {
                 showNewDoc:         $showNewDoc,
                 showLoadFromEditor: $showLoadFromEditor,
                 scrollOffset:       tbScrollOffset,
+                scrollOffsetX:      tbScrollOffsetX,
                 onBuildRun:         { buildAndRunMash() })
                 .environmentObject(themeVM)
 
@@ -604,30 +609,42 @@ struct MashCanvasView: View {
         // Unified gesture: drag starting in toolbar area scrolls toolbar,
         // drag starting on canvas pans the canvas — no competing gestures
         .gesture(
-            DragGesture(minimumDistance:4, coordinateSpace:.local)
+            DragGesture(minimumDistance:1, coordinateSpace:.local)
                 .onChanged { val in
                     if dragIsToolbar == nil {
                         dragIsToolbar = val.startLocation.x < 72
                     }
                     if dragIsToolbar == true {
                         let total = CGFloat(toolbarItemCount) * 42
-                        let maxH  = UIScreen.main.bounds.height * 0.7
-                        let raw   = tbScrollBase + val.translation.height
-                        tbScrollOffset = total > maxH
-                            ? Swift.min(0, Swift.max(-(total-maxH), raw)) : 0
+                        let isVert = vm.toolbarSide == .left || vm.toolbarSide == .right
+                        if isVert {
+                            let maxH = UIScreen.main.bounds.height * 0.7
+                            let raw  = tbScrollBase + val.translation.height
+                            tbScrollOffset = total > maxH
+                                ? Swift.min(0, Swift.max(-(total-maxH), raw)) : 0
+                        } else {
+                            let maxW = UIScreen.main.bounds.width * 0.7
+                            let raw  = tbScrollBaseX + val.translation.width
+                            tbScrollOffsetX = total > maxW
+                                ? Swift.min(0, Swift.max(-(total-maxW), raw)) : 0
+                        }
                     } else if !vm.isDraggingNode {
-                        let dx = val.translation.width  - vm.lastPanTranslation.x
-                        let dy = val.translation.height - vm.lastPanTranslation.y
+                        let dx = val.translation.width  - panLast.x
+                        let dy = val.translation.height - panLast.y
                         vm.offset = CGPoint(x: vm.offset.x + dx/vm.scale,
                                             y: vm.offset.y + dy/vm.scale)
-                        vm.lastPanTranslation = CGPoint(x: val.translation.width,
-                                                         y: val.translation.height)
+                        panLast = CGPoint(x: val.translation.width,
+                                          y: val.translation.height)
                     }
                 }
                 .onEnded { _ in
-                    if dragIsToolbar == true { tbScrollBase = tbScrollOffset }
-                    dragIsToolbar         = nil
-                    vm.lastPanTranslation = .zero
+                    if dragIsToolbar == true {
+                        let isVert = vm.toolbarSide == .left || vm.toolbarSide == .right
+                        if isVert { tbScrollBase = tbScrollOffset }
+                        else      { tbScrollBaseX = tbScrollOffsetX }
+                    }
+                    dragIsToolbar = nil
+                    panLast       = .zero
                 }
         )
         .ignoresSafeArea(edges:.bottom)
@@ -809,7 +826,7 @@ struct MashSideToolbar: View {
                     let maxW  = geo.size.width*0.72
                     HStack(spacing:2) { toolItems() }
                         .offset(x: total > maxW
-                            ? Swift.min(0, Swift.max(-(total-maxW), scrollOffset))
+                            ? Swift.min(0, Swift.max(-(total-maxW), scrollOffsetX))
                             : 0)
                         .frame(width:Swift.min(total,maxW), height:42, alignment:.leading)
                         .clipped()
