@@ -47,6 +47,7 @@ class MashCanvasVM: ObservableObject {
     // Pan — absolute method (same as nodeDrag) for fluid continuous update
     // Socket drag (connect / disconnect by dragging an edge endpoint)
     @Published var socketFromId:    String?  = nil
+    @Published var socketLinkId:    String?  = nil
     @Published var socketIsInput:   Bool     = false
     @Published var socketPoint:     CGPoint? = nil
     var panStartOffset:             CGPoint = .zero
@@ -236,6 +237,57 @@ class MashCanvasVM: ObservableObject {
             hops += 1
         }
         return false
+    }
+
+    /// Break ONE specific link touching a node, leaving all others intact.
+    func breakLink(node: String, otherId: String, connId: String?,
+                   incoming: Bool, doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        if let cid = connId {
+            d.connections.removeAll { $0.id == cid }
+        } else if incoming {
+            d.nodes[otherId]?.children.removeAll { $0 == node }
+            d.nodes[node]?.parentId = nil
+        } else {
+            d.nodes[node]?.children.removeAll { $0 == otherId }
+            d.nodes[otherId]?.parentId = nil
+        }
+        store.updateDocument(d)
+    }
+
+    /// Move ONE link's far end onto a different node.
+    func repointLink(node: String, otherId: String, connId: String?,
+                     incoming: Bool, to target: String, doc: MashDocument) {
+        guard target != node, target != otherId else { return }
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        if let cid = connId, let i = d.connections.firstIndex(where: { $0.id == cid }) {
+            if incoming { d.connections[i].fromId = target }
+            else        { d.connections[i].toId   = target }
+        } else if incoming {
+            guard !isDescendant(target, of: node, doc: d) else { return }
+            if !otherId.isEmpty { d.nodes[otherId]?.children.removeAll { $0 == node } }
+            d.nodes[node]?.parentId = target
+            if !(d.nodes[target]?.children.contains(node) ?? false) {
+                d.nodes[target]?.children.append(node)
+            }
+        } else {
+            guard !isDescendant(node, of: target, doc: d) else { return }
+            if !otherId.isEmpty {
+                d.nodes[node]?.children.removeAll { $0 == otherId }
+                d.nodes[otherId]?.parentId = nil
+            }
+            if d.nodes[target]?.parentId == nil {
+                d.nodes[target]?.parentId = node
+                d.nodes[node]?.children.append(target)
+            } else {
+                var c = MashConnection(from: node, to: target, arrow: .forward)
+                c.dashed = false
+                d.connections.append(c)
+            }
+        }
+        store.updateDocument(d)
     }
 
     /// Detach a node from everything feeding INTO it (parent + incoming links).
@@ -1068,22 +1120,19 @@ struct MashCanvas: View {
                             vm.selectedId=n.id; vm.contextNodeId=n.id; vm.showContextMenu=true
                         }
 
-                        // ── Connection sockets ──────────────────────────
-                        if vm.hasLinks(n, doc: doc) || vm.selectedId == n.id {
-                            let hw = (n.width * vm.scale) / 2 + 9
-                            socketDot(n, isInput: true,  sz: sz)
-                                .position(x: sp.x - hw, y: sp.y)
-                            socketDot(n, isInput: false, sz: sz)
-                                .position(x: sp.x + hw, y: sp.y)
+                        // ── One socket per connection, on the facing side ──
+                        ForEach(socketLayout(n, sz: sz), id: \.0.id) { entry in
+                            socketDot(n, link: entry.0, sz: sz)
+                                .position(entry.1)
                         }
                     }
 
                     // Live wire while dragging from a socket
                     if let fid = vm.socketFromId, let pt = vm.socketPoint,
                        let fn = doc.nodes[fid] {
-                        let fs = vm.worldToScreen(CGPoint(x:fn.x,y:fn.y), sz:sz)
-                        let hw = (fn.width * vm.scale)/2 + 9
-                        let anchor = CGPoint(x: fs.x + (vm.socketIsInput ? -hw : hw), y: fs.y)
+                        let anchor = socketLayout(fn, sz: sz)
+                            .first { $0.0.id == vm.socketLinkId }?.1
+                            ?? vm.worldToScreen(CGPoint(x:fn.x,y:fn.y), sz:sz)
                         Path { p in p.move(to: anchor); p.addLine(to: pt) }
                             .stroke(Color(hex:"#00ffcc").opacity(0.9),
                                     style: StrokeStyle(lineWidth:2, dash:[5,4]))
@@ -1174,40 +1223,124 @@ struct MashCanvas: View {
     }
 
     // ── Node drag — start from world pos to avoid drift ──
-    /// A draggable connection socket. Drag OFF a node to disconnect,
-    /// or drag onto another node to (re)wire.
+    // ── A single live link touching a node ──────────────
+    struct MashLink: Identifiable {
+        let id: String          // stable key
+        let otherId: String     // node at the far end
+        let incoming: Bool      // true = flows into this node
+        let connId: String?     // nil = tree edge (parent/child)
+    }
+
+    /// Every link attached to a node — parent, children, and reference edges.
+    private func links(of n: MashNodeData) -> [MashLink] {
+        var out: [MashLink] = []
+        if let p = n.parentId, doc.nodes[p] != nil {
+            out.append(MashLink(id:"p-\(n.id)", otherId:p, incoming:true, connId:nil))
+        }
+        for c in n.children where doc.nodes[c] != nil {
+            out.append(MashLink(id:"c-\(n.id)-\(c)", otherId:c, incoming:false, connId:nil))
+        }
+        for c in doc.connections {
+            if c.toId == n.id, doc.nodes[c.fromId] != nil {
+                out.append(MashLink(id:"in-\(c.id)", otherId:c.fromId, incoming:true, connId:c.id))
+            } else if c.fromId == n.id, doc.nodes[c.toId] != nil {
+                out.append(MashLink(id:"out-\(c.id)", otherId:c.toId, incoming:false, connId:c.id))
+            }
+        }
+        return out
+    }
+
+    /// Place each link's socket on whichever edge of the node faces its
+    /// partner, spreading multiples evenly along that edge.
+    private func socketLayout(_ n: MashNodeData, sz: CGSize) -> [(MashLink, CGPoint)] {
+        let ls = links(of: n)
+        let showEmpty = ls.isEmpty && vm.selectedId == n.id
+        guard !ls.isEmpty || showEmpty else { return [] }
+
+        let sp = vm.worldToScreen(CGPoint(x:n.x, y:n.y), sz: sz)
+        let hw = (n.width * vm.scale) / 2 + 9
+        let nodeH: CGFloat = (n.imageData != nil ? 150 : 44) * vm.scale
+        let hh = nodeH / 2 + 9
+
+        // Bucket each link by the side that points at its partner
+        var sides: [Int:[MashLink]] = [0:[],1:[],2:[],3:[]]   // 0=L 1=R 2=T 3=B
+        for l in ls {
+            guard let o = doc.nodes[l.otherId] else { continue }
+            let dx = o.x - n.x, dy = o.y - n.y
+            let side: Int
+            if abs(dx) >= abs(dy) { side = dx < 0 ? 0 : 1 }
+            else                  { side = dy < 0 ? 2 : 3 }
+            sides[side]?.append(l)
+        }
+
+        var result: [(MashLink, CGPoint)] = []
+        for (side, group) in sides where !group.isEmpty {
+            // Keep ordering stable, then fan out along the edge
+            let sorted = group.sorted { a, b in
+                let oa = doc.nodes[a.otherId], ob = doc.nodes[b.otherId]
+                let va = (side <= 1) ? (oa?.y ?? 0) : (oa?.x ?? 0)
+                let vb = (side <= 1) ? (ob?.y ?? 0) : (ob?.x ?? 0)
+                return va == vb ? a.id < b.id : va < vb
+            }
+            let span = (side <= 1 ? nodeH : n.width * vm.scale) * 0.8
+            let cnt  = CGFloat(sorted.count)
+            for (i, l) in sorted.enumerated() {
+                let t = cnt <= 1 ? 0 : (CGFloat(i)/(cnt-1) - 0.5) * span
+                let pt: CGPoint
+                switch side {
+                case 0: pt = CGPoint(x: sp.x - hw, y: sp.y + t)
+                case 1: pt = CGPoint(x: sp.x + hw, y: sp.y + t)
+                case 2: pt = CGPoint(x: sp.x + t,  y: sp.y - hh)
+                default:pt = CGPoint(x: sp.x + t,  y: sp.y + hh)
+                }
+                result.append((l, pt))
+            }
+        }
+
+        // Unlinked but selected → show one hollow stub to drag out from
+        if showEmpty {
+            let stub = MashLink(id:"stub-\(n.id)", otherId:"", incoming:false, connId:nil)
+            result.append((stub, CGPoint(x: sp.x + hw, y: sp.y)))
+        }
+        return result
+    }
+
+    /// Drag a socket off the node to break that one link,
+    /// or onto another node to re-point it.
     @ViewBuilder
-    private func socketDot(_ n: MashNodeData, isInput: Bool, sz: CGSize) -> some View {
-        let connected = isInput
-            ? (n.parentId != nil || doc.connections.contains { $0.toId == n.id })
-            : (!n.children.isEmpty || doc.connections.contains { $0.fromId == n.id })
-        let active = vm.socketFromId == n.id && vm.socketIsInput == isInput
+    private func socketDot(_ n: MashNodeData, link: MashLink, sz: CGSize) -> some View {
+        let live   = !link.otherId.isEmpty
+        let active = vm.socketFromId == n.id && vm.socketLinkId == link.id
+        let tint   = link.incoming ? Color(hex:"#00ccff") : Color(hex:"#00ffcc")
         Circle()
-            .fill(connected ? Color(hex:"#00ffcc") : Color(hex:"#0d1117"))
-            .overlay(Circle().stroke(Color(hex:"#00ffcc").opacity(connected ? 1 : 0.55),
-                                     lineWidth: 1.5))
+            .fill(live ? tint : Color(hex:"#0d1117"))
+            .overlay(Circle().stroke(tint.opacity(live ? 1 : 0.55), lineWidth: 1.5))
             .frame(width: active ? 15 : 11, height: active ? 15 : 11)
-            .shadow(color: Color(hex:"#00ffcc").opacity(connected ? 0.6 : 0), radius: 4)
-            .contentShape(Circle().inset(by: -10))
+            .shadow(color: tint.opacity(live ? 0.6 : 0), radius: 4)
+            .contentShape(Circle().inset(by: -11))
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
                     .onChanged { val in
                         if vm.socketFromId == nil {
                             vm.socketFromId  = n.id
-                            vm.socketIsInput = isInput
+                            vm.socketLinkId  = link.id
+                            vm.socketIsInput = link.incoming
                         }
                         vm.socketPoint = val.location
                     }
                     .onEnded { val in
-                        defer { vm.socketFromId = nil; vm.socketPoint = nil }
+                        defer {
+                            vm.socketFromId = nil; vm.socketLinkId = nil; vm.socketPoint = nil
+                        }
                         let target = hitTestNode(at: val.location, excluding: n.id, sz: sz)
                         if let t = target {
-                            if isInput { vm.rewireParent(n.id, to: t, doc: doc) }
-                            else       { vm.linkOut(from: n.id, to: t, doc: doc) }
-                        } else if connected {
-                            // Released on empty canvas → disconnect this side
-                            if isInput { vm.detachIncoming(n.id, doc: doc) }
-                            else       { vm.detachOutgoing(n.id, doc: doc) }
+                            vm.repointLink(node: n.id, otherId: link.otherId,
+                                           connId: link.connId, incoming: link.incoming,
+                                           to: t, doc: doc)
+                        } else if live {
+                            vm.breakLink(node: n.id, otherId: link.otherId,
+                                         connId: link.connId, incoming: link.incoming,
+                                         doc: doc)
                         }
                     }
             )
@@ -1561,6 +1694,11 @@ struct MashNodeEditorSheet: View {
     @State private var type:   MashNodeType = .note
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
+    // Custom per-node colors (any color, not just the presets)
+    @State private var useCustomColors = false
+    @State private var fillCol:   Color = .teal
+    @State private var borderCol: Color = .teal
+    @State private var textCol:   Color = .white
     // Custom per-node colors (any color, not just theme presets)
     @State private var useCustomColors = false
     @State private var fillCol:   Color = .teal
@@ -1642,6 +1780,33 @@ struct MashNodeEditorSheet: View {
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
 
+                        // ── Custom colors (full picker, unlimited) ──
+                        VStack(alignment:.leading, spacing:10) {
+                            Toggle("Custom Colors", isOn: $useCustomColors)
+                                .tint(themeVM.accent)
+                                .font(.system(size:11,design:.monospaced))
+                                .foregroundColor(themeVM.dim)
+                            if useCustomColors {
+                                ColorPicker("Fill",   selection:$fillCol,   supportsOpacity:false)
+                                ColorPicker("Border", selection:$borderCol, supportsOpacity:false)
+                                ColorPicker("Text",   selection:$textCol,   supportsOpacity:false)
+                                Button {
+                                    useCustomColors = false
+                                } label: {
+                                    Label("Reset to theme colors", systemImage:"arrow.counterclockwise")
+                                        .font(.system(size:10,design:.monospaced))
+                                        .foregroundColor(themeVM.dim)
+                                }
+                            }
+                        }
+                        .font(.system(size:11,design:.monospaced))
+                        .foregroundColor(themeVM.text)
+                        .padding(12)
+                        .background(Color(hex:"#161b22"))
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius:10)
+                            .stroke(Color(hex:"#30363d"), lineWidth:0.5))
+
                         // ── Custom colors — full spectrum, not just presets ──
                         VStack(alignment:.leading, spacing:10) {
                             Toggle("Custom Colors", isOn: $useCustomColors)
@@ -1709,6 +1874,12 @@ struct MashNodeEditorSheet: View {
             italic = nodeData.italic
             type   = nodeData.type
             if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
+            useCustomColors = nodeData.fillColor != nil
+                           || nodeData.borderColor != nil
+                           || nodeData.textColor != nil
+            if let f = nodeData.fillColor   { fillCol   = Color(hex:f) }
+            if let b = nodeData.borderColor { borderCol = Color(hex:b) }
+            if let t = nodeData.textColor   { textCol   = Color(hex:t) }
             if let f = nodeData.fillColor {
                 useCustomColors = true
                 fillCol = Color(hex:f)
