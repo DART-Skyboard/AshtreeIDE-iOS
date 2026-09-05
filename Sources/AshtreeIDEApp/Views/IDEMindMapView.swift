@@ -44,7 +44,7 @@ class MashCanvasVM: ObservableObject {
     @Published var toolbarSide:     MashToolbarSide = .left
     // Image picker trigger
     @Published var showImagePickerForNode: String? = nil
-    // Pan — store start position so translation is always absolute (like nodeDrag)
+    // Pan — absolute method (same as nodeDrag) for fluid continuous update
     var panStartOffset:             CGPoint = .zero
     var lastPanTranslation:         CGPoint = .zero
     // Zoom
@@ -955,9 +955,9 @@ struct MashCanvas: View {
                                 }
                                 vm.marqueeEnd = val.location
                             } else {
-                                // Absolute translation from drag start — same pattern as nodeDrag
-                                // Store start offset on first frame, then apply total translation
-                                if !vm.isDraggingNode && vm.panStartOffset == .zero {
+                                // Absolute pan: store start offset once, apply total translation
+                                // val.translation is always correct per-frame — no accumulation needed
+                                if vm.panStartOffset == .zero {
                                     vm.panStartOffset = vm.offset
                                 }
                                 vm.offset = CGPoint(
