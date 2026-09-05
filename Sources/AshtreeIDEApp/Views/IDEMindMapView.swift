@@ -44,7 +44,8 @@ class MashCanvasVM: ObservableObject {
     @Published var toolbarSide:     MashToolbarSide = .left
     // Image picker trigger
     @Published var showImagePickerForNode: String? = nil
-    // Pan accumulator
+    // Pan — store start position so translation is always absolute (like nodeDrag)
+    var panStartOffset:             CGPoint = .zero
     var lastPanTranslation:         CGPoint = .zero
     // Zoom
     let minScale: CGFloat = 0.05
@@ -567,13 +568,6 @@ struct MashDocListSheet: View {
 
 // MARK: - Canvas Host View
 
-// Real-time drag state — @GestureState triggers immediate SwiftUI redraws
-private enum CVDragState {
-    case inactive
-    case toolbar(CGFloat, CGFloat) // (vertical delta, horizontal delta)
-    case canvas(CGFloat, CGFloat)  // (dx, dy) in screen points
-}
-
 struct MashCanvasView: View {
     let doc: MashDocument
     @EnvironmentObject var themeVM: IDEThemeViewModel
@@ -582,13 +576,6 @@ struct MashCanvasView: View {
     @EnvironmentObject var ideVM:    IDEState
     @State private var showNodeEditor     = false
     @State private var showThemePicker    = false
-    // Toolbar scroll committed positions
-    @State private var tbScrollBase:   CGFloat = 0
-    @State private var tbScrollBaseX:  CGFloat = 0
-    // Canvas pan committed position (world coords, adjusted by scale)
-    // vm.offset holds committed pan; live delta applied via GestureState
-    // GestureState for real-time gesture tracking
-    @GestureState private var dragGS: CVDragState = .inactive
     @State private var showExport         = false
     @State private var showDocList        = false
     @State private var showNewDoc         = false
@@ -598,115 +585,7 @@ struct MashCanvasView: View {
         ZStack {
             MashCanvas(doc: doc, vm: vm)
                 .environmentObject(themeVM)
-                // Live pan: apply gesture delta immediately before commit
-                .transformEffect({
-                    if case .canvas(let dx, let dy) = dragGS {
-                        return CGAffineTransform(translationX: dx, y: dy)
-                    }
-                    return .identity
-                }())
 
-            MashSideToolbar(doc: doc, vm: vm,
-                showThemePicker:    $showThemePicker,
-                showExport:         $showExport,
-                showDocList:        $showDocList,
-                showNewDoc:         $showNewDoc,
-                showLoadFromEditor: $showLoadFromEditor,
-                scrollOffset:       {
-                    // Live: base + current gesture delta
-                    if case .toolbar(let dy, _) = dragGS {
-                        let total = CGFloat(toolbarItemCount) * 42
-                        let maxH  = UIScreen.main.bounds.height * 0.7
-                        return total > maxH ? Swift.min(0, Swift.max(-(total-maxH), tbScrollBase+dy)) : 0
-                    }
-                    return tbScrollBase
-                }(),
-                scrollOffsetX:      {
-                    if case .toolbar(_, let dx) = dragGS {
-                        let total = CGFloat(toolbarItemCount) * 42
-                        let maxW  = UIScreen.main.bounds.width * 0.7
-                        return total > maxW ? Swift.min(0, Swift.max(-(total-maxW), tbScrollBaseX+dx)) : 0
-                    }
-                    return tbScrollBaseX
-                }(),
-                onBuildRun:         { buildAndRunMash() })
-                .environmentObject(themeVM)
-
-            headerBar
-        }
-        // Real-time gesture using @GestureState for immediate per-frame redraws
-        .gesture(
-            DragGesture(minimumDistance:1, coordinateSpace:.local)
-                .updating($dragGS) { val, state, _ in
-                    // Set kind on first frame from start location
-                    let isToolbar = val.startLocation.x < 72
-                    if isToolbar {
-                        state = .toolbar(val.translation.height, val.translation.width)
-                    } else if !vm.isDraggingNode {
-                        state = .canvas(val.translation.width, val.translation.height)
-                    }
-                }
-                .onEnded { val in
-                    // Commit toolbar scroll position
-                    let isVert = vm.toolbarSide == .left || vm.toolbarSide == .right
-                    if val.startLocation.x < 72 {
-                        let total = CGFloat(toolbarItemCount) * 42
-                        if isVert {
-                            let maxH = UIScreen.main.bounds.height * 0.7
-                            tbScrollBase = total > maxH
-                                ? Swift.min(0, Swift.max(-(total-maxH), tbScrollBase + val.translation.height))
-                                : 0
-                        } else {
-                            let maxW = UIScreen.main.bounds.width * 0.7
-                            tbScrollBaseX = total > maxW
-                                ? Swift.min(0, Swift.max(-(total-maxW), tbScrollBaseX + val.translation.width))
-                                : 0
-                        }
-                    } else if !vm.isDraggingNode {
-                        // Commit canvas pan — add live delta to committed offset
-                        vm.offset = CGPoint(
-                            x: vm.offset.x + val.translation.width  / vm.scale,
-                            y: vm.offset.y + val.translation.height / vm.scale)
-                    }
-                }
-        )
-        .ignoresSafeArea(edges:.bottom)
-        .sheet(isPresented: $showThemePicker) {
-            MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showExport) {
-            MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showDocList) {
-            MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showNewDoc) {
-            MashNewDocSheet(isPresented:$showNewDoc).environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showLoadFromEditor) {
-            MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
-                .environmentObject(themeVM).environmentObject(ideVM)
-        }
-        // Image picker triggered from context menu "Attach Image"
-        .sheet(item: Binding(
-            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
-            set: { vm.showImagePickerForNode = $0?.id }
-        )) { target in
-            NodeImagePickerSheet(nodeId: target.id, doc: doc)
-                .environmentObject(themeVM)
-        }
-        .sheet(isPresented: $showNodeEditor) {
-            if let id=vm.selectedId, let n=doc.nodes[id] {
-                MashNodeEditorSheet(nodeData:n,doc:doc,onDismiss:{showNodeEditor=false})
-                    .environmentObject(themeVM)
-            }
-        }
-        .onChange(of: vm.contextNodeId) { id in
-            if id != nil && vm.showContextMenu == false { showNodeEditor = true }
-        }
-    }
-
-    @ViewBuilder private var headerBar: some View {
             VStack {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
@@ -718,7 +597,6 @@ struct MashCanvasView: View {
                         .background(Color(hex:"#161b22").opacity(0.92)).cornerRadius(6)
                         .overlay(RoundedRectangle(cornerRadius:6).stroke(themeVM.accent.opacity(0.3),lineWidth:0.5))
                     }
-                    Spacer()
                     if vm.tool == .connect || vm.tool == .connectSingle || vm.tool == .mainLink {
                         let arrow = vm.tool == .connect ? "↔" : vm.tool == .mainLink ? "—" : "→"
                         let lbl   = vm.connectionFirst == nil ? "\(arrow) Tap source" : "\(arrow) Tap target"
@@ -754,7 +632,6 @@ struct MashCanvasView: View {
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
                 .background(.ultraThinMaterial)
-                Spacer()
                 HStack {
                     Spacer()
                     Text("\(Int(vm.scale*100))%")
@@ -764,12 +641,55 @@ struct MashCanvasView: View {
                     Spacer()
                 }.padding(.bottom,8)
             }
-    }
-
-    // Number of toolbar items for scroll calculation
-    private var toolbarItemCount: Int {
-        // Count items defined in MashSideToolbar.items
-        return 22 // update if items change
+        }
+        .ignoresSafeArea(edges:.bottom)
+        // Toolbar as overlay — sits on top visually but doesn't block canvas gestures
+        .overlay(
+            MashSideToolbar(doc: doc, vm: vm,
+                showThemePicker:    $showThemePicker,
+                showExport:         $showExport,
+                showDocList:        $showDocList,
+                showNewDoc:         $showNewDoc,
+                showLoadFromEditor: $showLoadFromEditor,
+                onBuildRun:         { buildAndRunMash() })
+                .environmentObject(themeVM)
+                .allowsHitTesting(true)
+        )
+        .sheet(isPresented: $showThemePicker) {
+            MashThemeSheet(doc:doc,isPresented:$showThemePicker).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showExport) {
+            MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showDocList) {
+            MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showNewDoc) {
+            MashNewDocSheet(isPresented:$showNewDoc).environmentObject(themeVM)
+        }
+        .sheet(isPresented: $showLoadFromEditor) {
+            MashLoadFromEditorSheet(isPresented:$showLoadFromEditor)
+                .environmentObject(themeVM).environmentObject(ideVM)
+        }
+        // Image picker triggered from context menu "Attach Image"
+        .sheet(item: Binding(
+            get: { vm.showImagePickerForNode.map { NodeImageTarget(id:$0) } },
+            set: { vm.showImagePickerForNode = $0?.id }
+        )) { target in
+            NodeImagePickerSheet(nodeId: target.id, doc: doc)
+                .environmentObject(themeVM)
+        }
+        // Node editor — driven by vm.showNodeEditor (set from context menu or double-tap)
+        .sheet(isPresented: Binding(
+            get: { vm.showNodeEditor },
+            set: { vm.showNodeEditor = $0 }
+        )) {
+            if let id = vm.editorNodeId ?? vm.selectedId, let n = doc.nodes[id] {
+                MashNodeEditorSheet(nodeData:n, doc:doc,
+                    onDismiss: { vm.showNodeEditor = false })
+                    .environmentObject(themeVM)
+            }
+        }
     }
 
     private func buildAndRunMash() {
@@ -791,8 +711,6 @@ struct MashSideToolbar: View {
     @Binding var showDocList:         Bool
     @Binding var showNewDoc:          Bool
     @Binding var showLoadFromEditor:  Bool
-    let scrollOffset:  CGFloat
-    let scrollOffsetX: CGFloat
     let onBuildRun: () -> Void
     @EnvironmentObject var themeVM: IDEThemeViewModel
 
@@ -821,6 +739,14 @@ struct MashSideToolbar: View {
         ToolItem(icon:"paintpalette.fill")           { showThemePicker = true },
         // Image node
         ToolItem(icon:"photo.badge.plus")            { vm.addImageNode(doc:doc) },
+        // ASH coding node types (always available, especially useful in ASH template)
+        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addASHNode(doc:doc, type:.ashCode) },
+        ToolItem(icon:"terminal")                { vm.addASHNode(doc:doc, type:.outTerminal) },
+        ToolItem(icon:"rectangle.on.rectangle")  { vm.addASHNode(doc:doc, type:.out2D) },
+        ToolItem(icon:"cube")                    { vm.addASHNode(doc:doc, type:.out3D) },
+        ToolItem(icon:"arrow.down.to.line")      { vm.addASHNode(doc:doc, type:.inputForm) },
+        ToolItem(icon:"arrow.up.from.line")      { vm.addASHNode(doc:doc, type:.outputForm) },
+        ToolItem(icon:"arrowshape.turn.up.left") { vm.addASHNode(doc:doc, type:.returnNode) },
         // Export
         ToolItem(icon:"square.and.arrow.up")         { showExport = true },
         // Load code into map
@@ -830,30 +756,30 @@ struct MashSideToolbar: View {
         // New map / Open map
         ToolItem(icon:"plus.square.on.square")       { showNewDoc = true },
         ToolItem(icon:"folder.fill")                 { showDocList = true },
+        // ASH coding nodes
+        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addAshNode(doc:doc, type:.ashCode)   },
+        ToolItem(icon:"arrow.down.to.line")          { vm.addAshNode(doc:doc, type:.inputForm)  },
+        ToolItem(icon:"terminal")                    { vm.addAshNode(doc:doc, type:.outputForm)  },
+        ToolItem(icon:"rectangle.on.rectangle")      { vm.addAshNode(doc:doc, type:.out2D)      },
+        ToolItem(icon:"cube.transparent")            { vm.addAshNode(doc:doc, type:.out3D)      },
+        ToolItem(icon:"arrow.uturn.backward.circle") { vm.addAshNode(doc:doc, type:.returnNode)  },
     ]}
 
     var body: some View {
         GeometryReader { geo in
             let isVertical = vm.toolbarSide == .left || vm.toolbarSide == .right
+            // Toolbar content — fixedSize so it only takes content dimensions
             Group {
                 if isVertical {
-                    let total = CGFloat(items.count)*42
-                    let maxH  = geo.size.height*0.72
-                    VStack(spacing:2) { toolItems() }
-                        .offset(y: total > maxH
-                            ? Swift.min(0, Swift.max(-(total-maxH), scrollOffset))
-                            : 0)
-                        .frame(width:42, height:Swift.min(total,maxH), alignment:.top)
-                        .clipped()
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing:2) { toolItems() }
+                    }
+                    .frame(width: 50, height: Swift.min(CGFloat(items.count) * 42, geo.size.height * 0.75))
                 } else {
-                    let total = CGFloat(items.count)*42
-                    let maxW  = geo.size.width*0.72
-                    HStack(spacing:2) { toolItems() }
-                        .offset(x: total > maxW
-                            ? Swift.min(0, Swift.max(-(total-maxW), scrollOffsetX))
-                            : 0)
-                        .frame(width:Swift.min(total,maxW), height:42, alignment:.leading)
-                        .clipped()
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing:2) { toolItems() }
+                    }
+                    .frame(width: Swift.min(CGFloat(items.count) * 42, geo.size.width * 0.75), height: 50)
                 }
             }
             .padding(6)
@@ -907,10 +833,10 @@ struct MashSideToolbar: View {
 
     private func isActive(_ icon: String) -> Bool {
         switch icon {
-        case "cursorarrow":                return vm.tool == .select
-        case "line.diagonal":              return vm.tool == .mainLink
-        case "arrow.left.and.right":       return vm.tool == .connect
-        case "arrow.right":                return vm.tool == .connectSingle
+        case "cursorarrow":                 return vm.tool == .select
+        case "line.diagonal":               return vm.tool == .mainLink
+        case "arrow.left.and.right":        return vm.tool == .connect
+        case "arrow.right":                 return vm.tool == .connectSingle
         case "rectangle.dashed.badge.plus": return vm.tool == .marquee
         default: return false
         }
@@ -1018,29 +944,49 @@ struct MashCanvas: View {
                 .clipped()
                 // Pan as simultaneousGesture: fires alongside node gestures,
                 // blocked only when isDraggingNode is true
-                                .simultaneousGesture(
-                    DragGesture(minimumDistance:6, coordinateSpace:.local)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance:1, coordinateSpace:.local)
                         .onChanged { val in
-                            guard !vm.isDraggingNode, vm.tool == .marquee else { return }
-                            if vm.marqueeStart == nil {
-                                vm.marqueeStart = val.startLocation; vm.isMarqueeActive = true
+                            guard !vm.isDraggingNode else { return }
+                            if vm.tool == .marquee {
+                                if vm.marqueeStart == nil {
+                                    vm.marqueeStart    = val.startLocation
+                                    vm.isMarqueeActive = true
+                                }
+                                vm.marqueeEnd = val.location
+                            } else {
+                                // Absolute translation from drag start — same pattern as nodeDrag
+                                // Store start offset on first frame, then apply total translation
+                                if !vm.isDraggingNode && vm.panStartOffset == .zero {
+                                    vm.panStartOffset = vm.offset
+                                }
+                                vm.offset = CGPoint(
+                                    x: vm.panStartOffset.x + val.translation.width  / vm.scale,
+                                    y: vm.panStartOffset.y + val.translation.height / vm.scale)
                             }
-                            vm.marqueeEnd = val.location
                         }
                         .onEnded { _ in
+                            vm.panStartOffset     = .zero
+                            vm.lastPanTranslation = .zero
                             if vm.isMarqueeActive,
-                               let ms = vm.marqueeStart, let me = vm.marqueeEnd {
-                                let rect = CGRect(x:Swift.min(ms.x,me.x),y:Swift.min(ms.y,me.y),
-                                                  width:abs(me.x-ms.x),height:abs(me.y-ms.y))
+                               let ms = vm.marqueeStart,
+                               let me = vm.marqueeEnd {
+                                let rect = CGRect(
+                                    x: Swift.min(ms.x, me.x),
+                                    y: Swift.min(ms.y, me.y),
+                                    width:  abs(me.x-ms.x),
+                                    height: abs(me.y-ms.y))
                                 var hits = Set<String>()
                                 for (_,n) in doc.nodes {
-                                    let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
+                                    let sp = vm.worldToScreen(CGPoint(x:n.x, y:n.y), sz:sz)
                                     if rect.contains(sp) { hits.insert(n.id) }
                                 }
-                                vm.selectedIds=hits
-                                vm.selectedId=hits.count==1 ? hits.first : nil
+                                vm.selectedIds = hits
+                                vm.selectedId  = hits.count == 1 ? hits.first : nil
                             }
-                            vm.marqueeStart=nil; vm.marqueeEnd=nil; vm.isMarqueeActive=false
+                            vm.marqueeStart    = nil
+                            vm.marqueeEnd      = nil
+                            vm.isMarqueeActive = false
                         }
                 )
 
