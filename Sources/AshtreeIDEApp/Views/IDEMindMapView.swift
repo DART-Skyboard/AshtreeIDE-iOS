@@ -174,7 +174,6 @@ class MashCanvasVM: ObservableObject {
     }
 
     // Add an ASH coding node
-    func addAshNode(doc: MashDocument, type: MashNodeType) {
         var d = doc
         let parentId = selectedId ?? doc.rootId
         guard let parent = d.nodes[parentId] else { return }
