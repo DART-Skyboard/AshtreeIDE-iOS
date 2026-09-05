@@ -641,6 +641,7 @@ struct MashCanvasView: View {
                     Spacer()
                 }.padding(.bottom,8)
             }
+            .frame(maxWidth:.infinity, maxHeight:.infinity, alignment:.top)
         }
         .ignoresSafeArea(edges:.bottom)
         // Toolbar as overlay — sits on top visually but doesn't block canvas gestures
@@ -861,6 +862,21 @@ struct MashCanvas: View {
                 // Background — pan gesture lives here so it only fires on empty canvas
                 (theme.canvasTransparent ? Color.clear : Color(hex:theme.canvasBackground))
                     .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    // Pan lives on the bottom-most background layer: nodes sit above
+                    // and consume their own touches, so this only fires on empty canvas.
+                    // Absolute translation (same pattern as nodeDrag) = fluid continuous pan.
+                    .gesture(
+                        DragGesture(minimumDistance:0, coordinateSpace:.local)
+                            .onChanged { val in
+                                guard !vm.isDraggingNode, vm.tool != .marquee else { return }
+                                if vm.panStartOffset == .zero { vm.panStartOffset = vm.offset }
+                                vm.offset = CGPoint(
+                                    x: vm.panStartOffset.x + val.translation.width  / vm.scale,
+                                    y: vm.panStartOffset.y + val.translation.height / vm.scale)
+                            }
+                            .onEnded { _ in vm.panStartOffset = .zero }
+                    )
                 // Dot grid
                 if !theme.canvasTransparent {
                     Canvas { ctx, size in
@@ -945,48 +961,27 @@ struct MashCanvas: View {
                 // Pan as simultaneousGesture: fires alongside node gestures,
                 // blocked only when isDraggingNode is true
                 .simultaneousGesture(
-                    DragGesture(minimumDistance:1, coordinateSpace:.local)
+                    DragGesture(minimumDistance:6, coordinateSpace:.local)
                         .onChanged { val in
-                            guard !vm.isDraggingNode else { return }
-                            if vm.tool == .marquee {
-                                if vm.marqueeStart == nil {
-                                    vm.marqueeStart    = val.startLocation
-                                    vm.isMarqueeActive = true
-                                }
-                                vm.marqueeEnd = val.location
-                            } else {
-                                // Absolute pan: store start offset once, apply total translation
-                                // val.translation is always correct per-frame — no accumulation needed
-                                if vm.panStartOffset == .zero {
-                                    vm.panStartOffset = vm.offset
-                                }
-                                vm.offset = CGPoint(
-                                    x: vm.panStartOffset.x + val.translation.width  / vm.scale,
-                                    y: vm.panStartOffset.y + val.translation.height / vm.scale)
+                            guard !vm.isDraggingNode, vm.tool == .marquee else { return }
+                            if vm.marqueeStart == nil {
+                                vm.marqueeStart = val.startLocation; vm.isMarqueeActive = true
                             }
+                            vm.marqueeEnd = val.location
                         }
                         .onEnded { _ in
-                            vm.panStartOffset     = .zero
-                            vm.lastPanTranslation = .zero
-                            if vm.isMarqueeActive,
-                               let ms = vm.marqueeStart,
-                               let me = vm.marqueeEnd {
-                                let rect = CGRect(
-                                    x: Swift.min(ms.x, me.x),
-                                    y: Swift.min(ms.y, me.y),
-                                    width:  abs(me.x-ms.x),
-                                    height: abs(me.y-ms.y))
+                            if vm.isMarqueeActive, let ms=vm.marqueeStart, let me=vm.marqueeEnd {
+                                let rect = CGRect(x:Swift.min(ms.x,me.x),y:Swift.min(ms.y,me.y),
+                                                  width:abs(me.x-ms.x),height:abs(me.y-ms.y))
                                 var hits = Set<String>()
                                 for (_,n) in doc.nodes {
-                                    let sp = vm.worldToScreen(CGPoint(x:n.x, y:n.y), sz:sz)
+                                    let sp = vm.worldToScreen(CGPoint(x:n.x,y:n.y),sz:sz)
                                     if rect.contains(sp) { hits.insert(n.id) }
                                 }
                                 vm.selectedIds = hits
-                                vm.selectedId  = hits.count == 1 ? hits.first : nil
+                                vm.selectedId  = hits.count==1 ? hits.first : nil
                             }
-                            vm.marqueeStart    = nil
-                            vm.marqueeEnd      = nil
-                            vm.isMarqueeActive = false
+                            vm.marqueeStart=nil; vm.marqueeEnd=nil; vm.isMarqueeActive=false
                         }
                 )
 
