@@ -480,6 +480,35 @@ public final class MashStore: ObservableObject {
         saveHistory()
     }
 
+    public func canRedo(_ docId: String?) -> Bool {
+        guard let id = docId else { return false }
+        return !(redoStacks[id]?.isEmpty ?? true)
+    }
+    public var canRedo: Bool { canRedo(activeDocId) }
+
+    /// Step forward one action that was undone.
+    @discardableResult
+    public func redo() -> Bool {
+        guard let id = activeDocId,
+              var stack = redoStacks[id],
+              let next = stack.popLast() else { return false }
+        redoStacks[id] = stack
+        // current state becomes undoable again
+        if let cur = documents.first(where: { $0.id == id }) {
+            var u = undoStacks[id] ?? []
+            u.append(cur)
+            if u.count > undoCap { u.removeFirst(u.count - undoCap) }
+            undoStacks[id] = u
+        }
+        if let idx = documents.firstIndex(where: { $0.id == next.id }) {
+            var d = next; d.modified = Date().timeIntervalSince1970
+            documents[idx] = d
+        }
+        undoTick &+= 1
+        saveHistory(); save()
+        return true
+    }
+
     public func canUndo(_ docId: String?) -> Bool {
         guard let id = docId else { return false }
         return !(undoStacks[id]?.isEmpty ?? true)
