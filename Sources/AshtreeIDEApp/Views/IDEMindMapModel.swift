@@ -441,22 +441,31 @@ public final class MashStore: ObservableObject {
 
     // ── Undo history: per-document, persisted, multi-step ──
     private var undoStacks: [String: [MashDocument]] = [:]
+    private var redoStacks: [String: [MashDocument]] = [:]
     private let undoKey = "mash_undo_v2"
+    private let redoKey = "mash_redo_v2"
     private let undoCap = 60
 
     /// Bumped on every history change so SwiftUI refreshes the undo button.
     @Published public private(set) var undoTick: Int = 0
 
     private func loadHistory() {
-        guard let data = UserDefaults.standard.data(forKey: undoKey),
-              let s = try? JSONDecoder().decode([String:[MashDocument]].self, from: data)
-        else { return }
-        undoStacks = s
+        if let data = UserDefaults.standard.data(forKey: undoKey),
+           let s = try? JSONDecoder().decode([String:[MashDocument]].self, from: data) {
+            undoStacks = s
+        }
+        if let data = UserDefaults.standard.data(forKey: redoKey),
+           let s = try? JSONDecoder().decode([String:[MashDocument]].self, from: data) {
+            redoStacks = s
+        }
     }
 
     private func saveHistory() {
         if let data = try? JSONEncoder().encode(undoStacks) {
             UserDefaults.standard.set(data, forKey: undoKey)
+        }
+        if let data = try? JSONEncoder().encode(redoStacks) {
+            UserDefaults.standard.set(data, forKey: redoKey)
         }
     }
 
@@ -466,6 +475,7 @@ public final class MashStore: ObservableObject {
         stack.append(doc)
         if stack.count > undoCap { stack.removeFirst(stack.count - undoCap) }
         undoStacks[doc.id] = stack
+        redoStacks[doc.id] = []   // a fresh action ends the old redo branch
         undoTick &+= 1
         saveHistory()
     }
@@ -485,6 +495,10 @@ public final class MashStore: ObservableObject {
               let prev = stack.popLast() else { return false }
         undoStacks[id] = stack
         if let idx = documents.firstIndex(where: { $0.id == prev.id }) {
+            var r = redoStacks[id] ?? []
+            r.append(documents[idx])          // remember what we're leaving
+            if r.count > undoCap { r.removeFirst(r.count - undoCap) }
+            redoStacks[id] = r
             var d = prev; d.modified = Date().timeIntervalSince1970
             documents[idx] = d
         }
@@ -493,8 +507,35 @@ public final class MashStore: ObservableObject {
         return true
     }
 
+    public func canRedo(_ docId: String?) -> Bool {
+        guard let id = docId else { return false }
+        return !(redoStacks[id]?.isEmpty ?? true)
+    }
+
+    public var canRedo: Bool { canRedo(activeDocId) }
+
+    /// Step forward again through actions that were undone.
+    @discardableResult
+    public func redo() -> Bool {
+        guard let id = activeDocId,
+              var stack = redoStacks[id],
+              let next = stack.popLast() else { return false }
+        redoStacks[id] = stack
+        if let idx = documents.firstIndex(where: { $0.id == next.id }) {
+            var u = undoStacks[id] ?? []
+            u.append(documents[idx])
+            if u.count > undoCap { u.removeFirst(u.count - undoCap) }
+            undoStacks[id] = u
+            var d = next; d.modified = Date().timeIntervalSince1970
+            documents[idx] = d
+        }
+        undoTick &+= 1
+        saveHistory(); save()
+        return true
+    }
+
     public func clearHistory() {
-        undoStacks.removeAll(); undoTick &+= 1; saveHistory()
+        undoStacks.removeAll(); redoStacks.removeAll(); undoTick &+= 1; saveHistory()
     }
 
     public func updateDocument(_ doc: MashDocument) {
