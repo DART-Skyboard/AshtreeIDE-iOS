@@ -733,7 +733,14 @@ struct MashCanvasView: View {
                             .foregroundColor(store.canUndo(doc.id) ? themeVM.accent : themeVM.dim)
                     }
                     .disabled(!store.canUndo(doc.id))
-                    .id(store.undoTick)
+                    .id("undo-\(store.undoTick)")
+                    Button { _ = MashStore.shared.redo() } label: {
+                        Image(systemName:"arrow.uturn.forward")
+                            .font(.system(size:11))
+                            .foregroundColor(store.canRedo(doc.id) ? themeVM.accent : themeVM.dim)
+                    }
+                    .disabled(!store.canRedo(doc.id))
+                    .id("redo-\(store.undoTick)")
                     if vm.selectedId != nil || !vm.selectedIds.isEmpty {
                         Button { vm.deleteSelected(doc:doc) } label: {
                             Image(systemName:"trash").font(.system(size:11)).foregroundColor(.red)
@@ -1554,6 +1561,11 @@ struct MashNodeEditorSheet: View {
     @State private var type:   MashNodeType = .note
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
+    // Custom per-node colors (any color, not just theme presets)
+    @State private var useCustomColors = false
+    @State private var fillCol:   Color = .teal
+    @State private var borderCol: Color = .teal
+    @State private var textCol:   Color = .white
     // FocusState MUST be at this level, not inside NavigationView
     @FocusState private var labelFocused: Bool
 
@@ -1630,6 +1642,48 @@ struct MashNodeEditorSheet: View {
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
 
+                        // ── Custom colors — full spectrum, not just presets ──
+                        VStack(alignment:.leading, spacing:10) {
+                            Toggle("Custom Colors", isOn: $useCustomColors)
+                                .tint(themeVM.accent)
+                                .font(.system(size:11,design:.monospaced))
+                                .foregroundColor(themeVM.dim)
+
+                            if useCustomColors {
+                                ColorPicker("Fill",   selection: $fillCol,   supportsOpacity:false)
+                                ColorPicker("Border", selection: $borderCol, supportsOpacity:false)
+                                ColorPicker("Text",   selection: $textCol,   supportsOpacity:false)
+
+                                // Live preview
+                                HStack {
+                                    Spacer()
+                                    Text(text.isEmpty ? "Preview" : text)
+                                        .font(.system(size:11,weight:bold ? .bold : .regular,
+                                                      design:.monospaced))
+                                        .italic(italic)
+                                        .foregroundColor(textCol)
+                                        .padding(.horizontal,14).padding(.vertical,9)
+                                        .background(RoundedRectangle(cornerRadius:9).fill(fillCol))
+                                        .overlay(RoundedRectangle(cornerRadius:9)
+                                            .stroke(borderCol, lineWidth:2))
+                                    Spacer()
+                                }
+                                .padding(.top,4)
+
+                                Button("Reset to theme colors") {
+                                    useCustomColors = false
+                                }
+                                .font(.system(size:10,design:.monospaced))
+                                .foregroundColor(themeVM.dim)
+                            }
+                        }
+                        .font(.system(size:11,design:.monospaced))
+                        .foregroundColor(themeVM.text)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius:10).fill(Color(hex:"#161b22")))
+                        .overlay(RoundedRectangle(cornerRadius:10)
+                            .stroke(Color(hex:"#21262d"), lineWidth:0.5))
+
                         Button { showImagePicker = true } label: {
                             Label(pickedImage != nil ? "Change Image" : "Attach Image",
                                   systemImage:"photo.badge.plus")
@@ -1655,6 +1709,12 @@ struct MashNodeEditorSheet: View {
             italic = nodeData.italic
             type   = nodeData.type
             if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
+            if let f = nodeData.fillColor {
+                useCustomColors = true
+                fillCol = Color(hex:f)
+                borderCol = Color(hex: nodeData.borderColor ?? f)
+                textCol   = Color(hex: nodeData.textColor   ?? "#ffffff")
+            }
             // Focus after the sheet animation finishes (~0.6s on iOS)
             DispatchQueue.main.asyncAfter(deadline:.now()+0.65) {
                 labelFocused = true
@@ -1674,6 +1734,15 @@ struct MashNodeEditorSheet: View {
         d.nodes[nodeData.id]?.italic    = italic
         d.nodes[nodeData.id]?.type      = type
         d.nodes[nodeData.id]?.imageData = pickedImage.flatMap { $0.jpegData(compressionQuality: 0.8) }
+        if useCustomColors {
+            d.nodes[nodeData.id]?.fillColor   = fillCol.toHexString()
+            d.nodes[nodeData.id]?.borderColor = borderCol.toHexString()
+            d.nodes[nodeData.id]?.textColor   = textCol.toHexString()
+        } else {
+            d.nodes[nodeData.id]?.fillColor   = nil
+            d.nodes[nodeData.id]?.borderColor = nil
+            d.nodes[nodeData.id]?.textColor   = nil
+        }
         store.updateDocument(d)
     }
 
@@ -2294,3 +2363,16 @@ struct NodeImagePickerSheet: View {
 }
 
 // ShareSheet is defined in IDEMainView.swift
+
+
+// MARK: - Color → hex (for saving custom node colors)
+extension Color {
+    /// "#rrggbb" for persistence in MashNodeData.
+    func toHexString() -> String {
+        let ui = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return "#00ffcc" }
+        let ri = Int((r * 255).rounded()), gi = Int((g * 255).rounded()), bi = Int((b * 255).rounded())
+        return String(format: "#%02x%02x%02x", ri, gi, bi)
+    }
+}
