@@ -768,7 +768,8 @@ struct MashSideToolbar: View {
     @Binding var showDocList:         Bool
     @Binding var showNewDoc:          Bool
     @Binding var showLoadFromEditor:  Bool
-    let scrollOffset: CGFloat
+    let scrollOffset:  CGFloat
+    let scrollOffsetX: CGFloat
     let onBuildRun: () -> Void
     @EnvironmentObject var themeVM: IDEThemeViewModel
 
