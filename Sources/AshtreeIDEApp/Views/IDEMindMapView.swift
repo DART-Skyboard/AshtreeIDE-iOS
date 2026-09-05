@@ -68,6 +68,7 @@ class MashCanvasVM: ObservableObject {
     }
 
     func addChildToSelected(doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
         let parentId = selectedId ?? doc.rootId
         guard let parent = doc.nodes[parentId] else { return }
         var d = doc
@@ -91,6 +92,7 @@ class MashCanvasVM: ObservableObject {
     }
 
     func addASHNode(doc: MashDocument, type: MashNodeType) {
+        MashStore.shared.pushHistory(doc)
         let parentId = selectedId ?? doc.rootId
         guard let parent = doc.nodes[parentId] else { return }
         var d = doc
@@ -119,6 +121,7 @@ class MashCanvasVM: ObservableObject {
     }
 
     func addImageNode(doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
         let parentId = selectedId ?? doc.rootId
         guard let parent = doc.nodes[parentId] else { return }
         var d = doc
@@ -138,6 +141,7 @@ class MashCanvasVM: ObservableObject {
     func deleteSelected(doc: MashDocument) {
         let ids = selectedIds.isEmpty ? (selectedId.map { Set([$0]) } ?? []) : selectedIds
         guard !ids.isEmpty else { return }
+        MashStore.shared.pushHistory(doc)
         var d = doc
         for nid in ids {
             guard nid != doc.rootId, let node = d.nodes[nid] else { continue }
@@ -201,7 +205,37 @@ class MashCanvasVM: ObservableObject {
     }
 
     // Add a free-standing node (no parent link — user links manually)
+    /// New independent main branch (its own root) — allows multiple trees per map.
+    func addMainBranch(doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        let newId = UUID().uuidString
+        let maxX = d.nodes.values.map { $0.x }.max() ?? 0
+        let avgY = d.nodes.values.map { $0.y }.reduce(0,+) / CGFloat(max(1,d.nodes.count))
+        let node = MashNodeData(id:newId, type:.root, text:"Main Branch",
+            detail:"", url:"", imageData:nil,
+            x: maxX + 320, y: avgY, width:150, children:[], parentId:nil,
+            collapsed:false, fillColor:nil, borderColor:nil,
+            textColor:nil, cornerStyle:nil, fontSize:nil, bold:true, italic:false)
+        d.nodes[newId] = node
+        store.updateDocument(d)
+        selectedId = newId
+    }
+
+    /// True if `candidate` sits anywhere beneath `ancestor` (cycle guard).
+    func isDescendant(_ candidate: String, of ancestor: String, doc: MashDocument) -> Bool {
+        var cur: String? = candidate
+        var hops = 0
+        while let c = cur, hops < 500 {
+            if c == ancestor { return true }
+            cur = doc.nodes[c]?.parentId
+            hops += 1
+        }
+        return false
+    }
+
     func addFreeNode(doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
         var d = doc
         let newId = UUID().uuidString
         let cx = (d.nodes.values.map { $0.x }.reduce(0,+) / CGFloat(max(1, d.nodes.count))) + 120
@@ -227,6 +261,7 @@ class MashCanvasVM: ObservableObject {
             if connectionFirst == nil {
                 connectionFirst = id
             } else if connectionFirst != id {
+                MashStore.shared.pushHistory(doc)
                 var d = doc
                 var c = MashConnection(from:connectionFirst!, to:id, arrow:.both)
                 c.dashed = true
@@ -251,13 +286,20 @@ class MashCanvasVM: ObservableObject {
             if connectionFirst == nil {
                 connectionFirst = id
             } else if connectionFirst != id {
+                MashStore.shared.pushHistory(doc)
                 var d = doc
-                // Remove old parent link for target
-                if let oldPid = d.nodes[id]?.parentId {
-                    d.nodes[oldPid]?.children.removeAll { $0 == id }
+                // If target has no parent yet, adopt it into the tree.
+                // Otherwise add an ADDITIONAL solid edge — never disconnect
+                // anything, so every node supports unlimited in/out links.
+                if d.nodes[id]?.parentId == nil,
+                   !isDescendant(connectionFirst!, of: id, doc: d) {
+                    d.nodes[id]?.parentId = connectionFirst!
+                    d.nodes[connectionFirst!]?.children.append(id)
+                } else {
+                    var c = MashConnection(from: connectionFirst!, to: id, arrow: .forward)
+                    c.dashed = false
+                    d.connections.append(c)
                 }
-                d.nodes[id]?.parentId = connectionFirst!
-                d.nodes[connectionFirst!]?.children.append(id)
                 store.updateDocument(d)
                 connectionFirst = nil; tool = .select
             }
@@ -624,6 +666,12 @@ struct MashCanvasView: View {
                     Button { vm.scale=1.0; vm.offset = .zero; vm.baseScale=1.0 } label: {
                         Image(systemName:"arrow.up.left.and.arrow.down.right").font(.system(size:11)).foregroundColor(themeVM.dim)
                     }
+                    Button { _ = MashStore.shared.undo() } label: {
+                        Image(systemName:"arrow.uturn.backward")
+                            .font(.system(size:11))
+                            .foregroundColor(MashStore.shared.canUndo ? themeVM.accent : themeVM.dim)
+                    }
+                    .disabled(!MashStore.shared.canUndo)
                     if vm.selectedId != nil || !vm.selectedIds.isEmpty {
                         Button { vm.deleteSelected(doc:doc) } label: {
                             Image(systemName:"trash").font(.system(size:11)).foregroundColor(.red)
@@ -727,6 +775,8 @@ struct MashSideToolbar: View {
         ToolItem(icon:"plus.circle.fill")            { vm.addChildToSelected(doc:doc) },
         // Add free node (no auto-link)
         ToolItem(icon:"plus.square")                 { vm.addFreeNode(doc:doc) },
+        // Add NEW MAIN BRANCH (independent root — multiple trees per map)
+        ToolItem(icon:"point.3.filled.connected.trianglepath.dotted") { vm.addMainBranch(doc:doc) },
         // Select
         ToolItem(icon:"cursorarrow")                  { vm.tool = .select },
         // Main solid link (reparents — solid tree edge)
@@ -758,13 +808,6 @@ struct MashSideToolbar: View {
         // New map / Open map
         ToolItem(icon:"plus.square.on.square")       { showNewDoc = true },
         ToolItem(icon:"folder.fill")                 { showDocList = true },
-        // ASH coding nodes
-        ToolItem(icon:"chevron.left.forwardslash.chevron.right") { vm.addAshNode(doc:doc, type:.ashCode)   },
-        ToolItem(icon:"arrow.down.to.line")          { vm.addAshNode(doc:doc, type:.inputForm)  },
-        ToolItem(icon:"terminal")                    { vm.addAshNode(doc:doc, type:.outputForm)  },
-        ToolItem(icon:"rectangle.on.rectangle")      { vm.addAshNode(doc:doc, type:.out2D)      },
-        ToolItem(icon:"cube.transparent")            { vm.addAshNode(doc:doc, type:.out3D)      },
-        ToolItem(icon:"arrow.uturn.backward.circle") { vm.addAshNode(doc:doc, type:.returnNode)  },
     ]}
 
     var body: some View {
@@ -1054,15 +1097,68 @@ struct MashCanvas: View {
                 d.nodes[n.id]?.y = vm.dragStartWorld.y + val.translation.height / vm.scale
                 MashStore.shared.updateDocument(d)
             }
-            .onEnded { _ in
+            .onEnded { val in
                 vm.isDraggingNode = false
                 vm.draggingId     = nil
-                // Snap back if using a strict template layout
+                let dropX = vm.dragStartWorld.x + val.translation.width  / vm.scale
+                let dropY = vm.dragStartWorld.y + val.translation.height / vm.scale
+                var d = doc
+                var handled = false
+
+                // (a) Dropped ON a node → that node becomes the parent
+                let others = d.nodes.values.filter { $0.id != n.id }
+                for other in others {
+                    let dist = sqrt(pow(dropX - other.x, 2) + pow(dropY - other.y, 2))
+                    guard dist < Swift.max(75, other.width * 0.6) else { continue }
+                    if vm.isDescendant(other.id, of: n.id, doc: d) { break }  // cycle guard
+                    MashStore.shared.pushHistory(doc)
+                    if let oldPid = d.nodes[n.id]?.parentId {
+                        d.nodes[oldPid]?.children.removeAll { $0 == n.id }
+                    }
+                    d.nodes[n.id]?.parentId = other.id
+                    if !(d.nodes[other.id]?.children.contains(n.id) ?? false) {
+                        d.nodes[other.id]?.children.append(n.id)
+                    }
+                    handled = true
+                    break
+                }
+
+                // (b) Dropped ON a connection → splice in between parent and child
+                if !handled {
+                    var pairs: [(String, String, CGFloat, CGFloat)] = []
+                    for p in d.nodes.values where p.id != n.id {
+                        for cid in p.children where cid != n.id {
+                            if let ch = d.nodes[cid] {
+                                pairs.append((p.id, cid, (p.x+ch.x)/2, (p.y+ch.y)/2))
+                            }
+                        }
+                    }
+                    for (pid, cid, mx, my) in pairs {
+                        guard sqrt(pow(dropX-mx,2) + pow(dropY-my,2)) < 60 else { continue }
+                        if vm.isDescendant(pid, of: n.id, doc: d) { break }
+                        MashStore.shared.pushHistory(doc)
+                        if let oldPid = d.nodes[n.id]?.parentId {
+                            d.nodes[oldPid]?.children.removeAll { $0 == n.id }
+                        }
+                        d.nodes[pid]?.children.removeAll { $0 == cid }
+                        d.nodes[n.id]?.parentId = pid
+                        d.nodes[pid]?.children.append(n.id)
+                        d.nodes[cid]?.parentId = n.id
+                        if !(d.nodes[n.id]?.children.contains(cid) ?? false) {
+                            d.nodes[n.id]?.children.append(cid)
+                        }
+                        handled = true
+                        break
+                    }
+                }
+
+                if handled { MashStore.shared.updateDocument(d) }
+
                 let strictLayouts: [MashLayout] = [.tree, .fishbone, .orgchart, .timeline]
-                if strictLayouts.contains(doc.layout) {
-                    var d = doc
-                    vm.applyAutoLayout(doc: &d)
-                    MashStore.shared.updateDocument(d)
+                if !handled, strictLayouts.contains(doc.layout) {
+                    var dd = doc
+                    vm.applyAutoLayout(doc: &dd)
+                    MashStore.shared.updateDocument(dd)
                 }
             }
     }
@@ -1151,8 +1247,9 @@ struct MashContextMenu: View {
     private func dup(){
         guard let n=doc.nodes[nodeId] else{return}
         var d=doc; let newId=UUID().uuidString
-        let c=MashNodeData(id:newId,type:n.type,text:n.text+" (copy)",detail:n.detail,url:n.url,imageData:n.imageData,x:n.x+70,y:n.y+70,width:n.width,children:[],parentId:n.parentId,collapsed:false,fillColor:n.fillColor,borderColor:n.borderColor,textColor:n.textColor,cornerStyle:n.cornerStyle,fontSize:n.fontSize,bold:n.bold,italic:n.italic)
-        d.nodes[newId]=c; if let pid=c.parentId{d.nodes[pid]?.children.append(newId)}
+        let c=MashNodeData(id:newId,type:n.type,text:n.text+" (copy)",detail:n.detail,url:n.url,imageData:n.imageData,x:n.x+70,y:n.y+70,width:n.width,children:[],parentId:nil,collapsed:false,fillColor:n.fillColor,borderColor:n.borderColor,textColor:n.textColor,cornerStyle:n.cornerStyle,fontSize:n.fontSize,bold:n.bold,italic:n.italic)
+        MashStore.shared.pushHistory(doc)
+        d.nodes[newId]=c   // unlinked — connect manually or drop onto a node/edge
         MashStore.shared.updateDocument(d); vm.selectedId=newId; vm.showContextMenu=false
     }
     @ViewBuilder private func row(_ label:String,_ icon:String,red:Bool=false,action:@escaping()->Void)->some View{
