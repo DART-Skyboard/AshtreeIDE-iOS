@@ -567,6 +567,13 @@ struct MashDocListSheet: View {
 
 // MARK: - Canvas Host View
 
+// Real-time drag state — @GestureState triggers immediate SwiftUI redraws
+private enum CVDragState {
+    case inactive
+    case toolbar(CGFloat, CGFloat) // (vertical delta, horizontal delta)
+    case canvas(CGFloat, CGFloat)  // (dx, dy) in screen points
+}
+
 struct MashCanvasView: View {
     let doc: MashDocument
     @EnvironmentObject var themeVM: IDEThemeViewModel
@@ -575,14 +582,13 @@ struct MashCanvasView: View {
     @EnvironmentObject var ideVM:    IDEState
     @State private var showNodeEditor     = false
     @State private var showThemePicker    = false
-    // Unified drag: tracks toolbar scroll + canvas pan in one gesture
-    @State private var tbScrollOffset:    CGFloat = 0
-    @State private var tbScrollBase:      CGFloat = 0
-    @State private var tbScrollOffsetX:   CGFloat = 0
-    @State private var tbScrollBaseX:     CGFloat = 0
-    @State private var dragIsToolbar:     Bool?   = nil
-    // Pan accumulator — @State so it persists reliably across gesture frames
-    @State private var panLast:           CGPoint = .zero
+    // Toolbar scroll committed positions
+    @State private var tbScrollBase:   CGFloat = 0
+    @State private var tbScrollBaseX:  CGFloat = 0
+    // Canvas pan committed position (world coords, adjusted by scale)
+    // vm.offset holds committed pan; live delta applied via GestureState
+    // GestureState for real-time gesture tracking
+    @GestureState private var dragGS: CVDragState = .inactive
     @State private var showExport         = false
     @State private var showDocList        = false
     @State private var showNewDoc         = false
@@ -592,6 +598,13 @@ struct MashCanvasView: View {
         ZStack {
             MashCanvas(doc: doc, vm: vm)
                 .environmentObject(themeVM)
+                // Live pan: apply gesture delta immediately before commit
+                .transformEffect({
+                    if case .canvas(let dx, let dy) = dragGS {
+                        return CGAffineTransform(translationX: dx, y: dy)
+                    }
+                    return .identity
+                }())
 
             MashSideToolbar(doc: doc, vm: vm,
                 showThemePicker:    $showThemePicker,
@@ -599,52 +612,62 @@ struct MashCanvasView: View {
                 showDocList:        $showDocList,
                 showNewDoc:         $showNewDoc,
                 showLoadFromEditor: $showLoadFromEditor,
-                scrollOffset:       tbScrollOffset,
-                scrollOffsetX:      tbScrollOffsetX,
+                scrollOffset:       {
+                    // Live: base + current gesture delta
+                    if case .toolbar(let dy, _) = dragGS {
+                        let total = CGFloat(toolbarItemCount) * 42
+                        let maxH  = UIScreen.main.bounds.height * 0.7
+                        return total > maxH ? Swift.min(0, Swift.max(-(total-maxH), tbScrollBase+dy)) : 0
+                    }
+                    return tbScrollBase
+                }(),
+                scrollOffsetX:      {
+                    if case .toolbar(_, let dx) = dragGS {
+                        let total = CGFloat(toolbarItemCount) * 42
+                        let maxW  = UIScreen.main.bounds.width * 0.7
+                        return total > maxW ? Swift.min(0, Swift.max(-(total-maxW), tbScrollBaseX+dx)) : 0
+                    }
+                    return tbScrollBaseX
+                }(),
                 onBuildRun:         { buildAndRunMash() })
                 .environmentObject(themeVM)
 
             headerBar
         }
-        // Unified gesture: drag starting in toolbar area scrolls toolbar,
-        // drag starting on canvas pans the canvas — no competing gestures
+        // Real-time gesture using @GestureState for immediate per-frame redraws
         .gesture(
             DragGesture(minimumDistance:1, coordinateSpace:.local)
-                .onChanged { val in
-                    if dragIsToolbar == nil {
-                        dragIsToolbar = val.startLocation.x < 72
-                    }
-                    if dragIsToolbar == true {
-                        let total = CGFloat(toolbarItemCount) * 42
-                        let isVert = vm.toolbarSide == .left || vm.toolbarSide == .right
-                        if isVert {
-                            let maxH = UIScreen.main.bounds.height * 0.7
-                            let raw  = tbScrollBase + val.translation.height
-                            tbScrollOffset = total > maxH
-                                ? Swift.min(0, Swift.max(-(total-maxH), raw)) : 0
-                        } else {
-                            let maxW = UIScreen.main.bounds.width * 0.7
-                            let raw  = tbScrollBaseX + val.translation.width
-                            tbScrollOffsetX = total > maxW
-                                ? Swift.min(0, Swift.max(-(total-maxW), raw)) : 0
-                        }
+                .updating($dragGS) { val, state, _ in
+                    // Set kind on first frame from start location
+                    let isToolbar = val.startLocation.x < 72
+                    if isToolbar {
+                        state = .toolbar(val.translation.height, val.translation.width)
                     } else if !vm.isDraggingNode {
-                        let dx = val.translation.width  - panLast.x
-                        let dy = val.translation.height - panLast.y
-                        vm.offset = CGPoint(x: vm.offset.x + dx/vm.scale,
-                                            y: vm.offset.y + dy/vm.scale)
-                        panLast = CGPoint(x: val.translation.width,
-                                          y: val.translation.height)
+                        state = .canvas(val.translation.width, val.translation.height)
                     }
                 }
-                .onEnded { _ in
-                    if dragIsToolbar == true {
-                        let isVert = vm.toolbarSide == .left || vm.toolbarSide == .right
-                        if isVert { tbScrollBase = tbScrollOffset }
-                        else      { tbScrollBaseX = tbScrollOffsetX }
+                .onEnded { val in
+                    // Commit toolbar scroll position
+                    let isVert = vm.toolbarSide == .left || vm.toolbarSide == .right
+                    if val.startLocation.x < 72 {
+                        let total = CGFloat(toolbarItemCount) * 42
+                        if isVert {
+                            let maxH = UIScreen.main.bounds.height * 0.7
+                            tbScrollBase = total > maxH
+                                ? Swift.min(0, Swift.max(-(total-maxH), tbScrollBase + val.translation.height))
+                                : 0
+                        } else {
+                            let maxW = UIScreen.main.bounds.width * 0.7
+                            tbScrollBaseX = total > maxW
+                                ? Swift.min(0, Swift.max(-(total-maxW), tbScrollBaseX + val.translation.width))
+                                : 0
+                        }
+                    } else if !vm.isDraggingNode {
+                        // Commit canvas pan — add live delta to committed offset
+                        vm.offset = CGPoint(
+                            x: vm.offset.x + val.translation.width  / vm.scale,
+                            y: vm.offset.y + val.translation.height / vm.scale)
                     }
-                    dragIsToolbar = nil
-                    panLast       = .zero
                 }
         )
         .ignoresSafeArea(edges:.bottom)
