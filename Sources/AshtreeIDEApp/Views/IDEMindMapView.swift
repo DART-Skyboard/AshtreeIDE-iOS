@@ -45,6 +45,10 @@ class MashCanvasVM: ObservableObject {
     // Image picker trigger
     @Published var showImagePickerForNode: String? = nil
     // Pan — absolute method (same as nodeDrag) for fluid continuous update
+    // Socket drag (connect / disconnect by dragging an edge endpoint)
+    @Published var socketFromId:    String?  = nil
+    @Published var socketIsInput:   Bool     = false
+    @Published var socketPoint:     CGPoint? = nil
     var panStartOffset:             CGPoint = .zero
     var lastPanTranslation:         CGPoint = .zero
     // Zoom
@@ -232,6 +236,63 @@ class MashCanvasVM: ObservableObject {
             hops += 1
         }
         return false
+    }
+
+    /// Detach a node from everything feeding INTO it (parent + incoming links).
+    func detachIncoming(_ id: String, doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        if let pid = d.nodes[id]?.parentId {
+            d.nodes[pid]?.children.removeAll { $0 == id }
+            d.nodes[id]?.parentId = nil
+        }
+        d.connections.removeAll { $0.toId == id }
+        store.updateDocument(d)
+    }
+
+    /// Remove everything flowing OUT of a node (children detach, outgoing links drop).
+    func detachOutgoing(_ id: String, doc: MashDocument) {
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        for cid in d.nodes[id]?.children ?? [] { d.nodes[cid]?.parentId = nil }
+        d.nodes[id]?.children.removeAll()
+        d.connections.removeAll { $0.fromId == id }
+        store.updateDocument(d)
+    }
+
+    /// Re-point a node's parent link to a new source node.
+    func rewireParent(_ id: String, to newParent: String, doc: MashDocument) {
+        guard id != newParent, !isDescendant(newParent, of: id, doc: doc) else { return }
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        if let pid = d.nodes[id]?.parentId { d.nodes[pid]?.children.removeAll { $0 == id } }
+        d.nodes[id]?.parentId = newParent
+        if !(d.nodes[newParent]?.children.contains(id) ?? false) {
+            d.nodes[newParent]?.children.append(id)
+        }
+        store.updateDocument(d)
+    }
+
+    /// Link out of `id` into `target` (adopts into tree if target is unparented).
+    func linkOut(from id: String, to target: String, doc: MashDocument) {
+        guard id != target, !isDescendant(id, of: target, doc: doc) else { return }
+        MashStore.shared.pushHistory(doc)
+        var d = doc
+        if d.nodes[target]?.parentId == nil {
+            d.nodes[target]?.parentId = id
+            d.nodes[id]?.children.append(target)
+        } else {
+            var c = MashConnection(from: id, to: target, arrow: .forward)
+            c.dashed = false
+            d.connections.append(c)
+        }
+        store.updateDocument(d)
+    }
+
+    /// Does this node have anything attached? Sockets show when it does.
+    func hasLinks(_ n: MashNodeData, doc: MashDocument) -> Bool {
+        if n.parentId != nil || !n.children.isEmpty { return true }
+        return doc.connections.contains { $0.fromId == n.id || $0.toId == n.id }
     }
 
     func addFreeNode(doc: MashDocument) {
@@ -669,9 +730,10 @@ struct MashCanvasView: View {
                     Button { _ = MashStore.shared.undo() } label: {
                         Image(systemName:"arrow.uturn.backward")
                             .font(.system(size:11))
-                            .foregroundColor(MashStore.shared.canUndo ? themeVM.accent : themeVM.dim)
+                            .foregroundColor(store.canUndo(doc.id) ? themeVM.accent : themeVM.dim)
                     }
-                    .disabled(!MashStore.shared.canUndo)
+                    .disabled(!store.canUndo(doc.id))
+                    .id(store.undoTick)
                     if vm.selectedId != nil || !vm.selectedIds.isEmpty {
                         Button { vm.deleteSelected(doc:doc) } label: {
                             Image(systemName:"trash").font(.system(size:11)).foregroundColor(.red)
@@ -998,6 +1060,30 @@ struct MashCanvas: View {
                         .onLongPressGesture(minimumDuration:0.4){
                             vm.selectedId=n.id; vm.contextNodeId=n.id; vm.showContextMenu=true
                         }
+
+                        // ── Connection sockets ──────────────────────────
+                        if vm.hasLinks(n, doc: doc) || vm.selectedId == n.id {
+                            let hw = (n.width * vm.scale) / 2 + 9
+                            socketDot(n, isInput: true,  sz: sz)
+                                .position(x: sp.x - hw, y: sp.y)
+                            socketDot(n, isInput: false, sz: sz)
+                                .position(x: sp.x + hw, y: sp.y)
+                        }
+                    }
+
+                    // Live wire while dragging from a socket
+                    if let fid = vm.socketFromId, let pt = vm.socketPoint,
+                       let fn = doc.nodes[fid] {
+                        let fs = vm.worldToScreen(CGPoint(x:fn.x,y:fn.y), sz:sz)
+                        let hw = (fn.width * vm.scale)/2 + 9
+                        let anchor = CGPoint(x: fs.x + (vm.socketIsInput ? -hw : hw), y: fs.y)
+                        Path { p in p.move(to: anchor); p.addLine(to: pt) }
+                            .stroke(Color(hex:"#00ffcc").opacity(0.9),
+                                    style: StrokeStyle(lineWidth:2, dash:[5,4]))
+                            .allowsHitTesting(false)
+                        Circle().fill(Color(hex:"#00ffcc"))
+                            .frame(width:9,height:9).position(pt)
+                            .allowsHitTesting(false)
                     }
                 }
                 .frame(width:sz.width,height:sz.height)
@@ -1081,6 +1167,59 @@ struct MashCanvas: View {
     }
 
     // ── Node drag — start from world pos to avoid drift ──
+    /// A draggable connection socket. Drag OFF a node to disconnect,
+    /// or drag onto another node to (re)wire.
+    @ViewBuilder
+    private func socketDot(_ n: MashNodeData, isInput: Bool, sz: CGSize) -> some View {
+        let connected = isInput
+            ? (n.parentId != nil || doc.connections.contains { $0.toId == n.id })
+            : (!n.children.isEmpty || doc.connections.contains { $0.fromId == n.id })
+        let active = vm.socketFromId == n.id && vm.socketIsInput == isInput
+        Circle()
+            .fill(connected ? Color(hex:"#00ffcc") : Color(hex:"#0d1117"))
+            .overlay(Circle().stroke(Color(hex:"#00ffcc").opacity(connected ? 1 : 0.55),
+                                     lineWidth: 1.5))
+            .frame(width: active ? 15 : 11, height: active ? 15 : 11)
+            .shadow(color: Color(hex:"#00ffcc").opacity(connected ? 0.6 : 0), radius: 4)
+            .contentShape(Circle().inset(by: -10))
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { val in
+                        if vm.socketFromId == nil {
+                            vm.socketFromId  = n.id
+                            vm.socketIsInput = isInput
+                        }
+                        vm.socketPoint = val.location
+                    }
+                    .onEnded { val in
+                        defer { vm.socketFromId = nil; vm.socketPoint = nil }
+                        let target = hitTestNode(at: val.location, excluding: n.id, sz: sz)
+                        if let t = target {
+                            if isInput { vm.rewireParent(n.id, to: t, doc: doc) }
+                            else       { vm.linkOut(from: n.id, to: t, doc: doc) }
+                        } else if connected {
+                            // Released on empty canvas → disconnect this side
+                            if isInput { vm.detachIncoming(n.id, doc: doc) }
+                            else       { vm.detachOutgoing(n.id, doc: doc) }
+                        }
+                    }
+            )
+    }
+
+    /// Which node sits under this screen point?
+    private func hitTestNode(at pt: CGPoint, excluding: String, sz: CGSize) -> String? {
+        var best: String? = nil
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        for node in doc.nodes.values where node.id != excluding {
+            let s = vm.worldToScreen(CGPoint(x:node.x, y:node.y), sz: sz)
+            let dx = pt.x - s.x, dy = pt.y - s.y
+            let d = sqrt(dx*dx + dy*dy)
+            let r = Swift.max(60, (node.width * vm.scale) * 0.6)
+            if d < r && d < bestDist { bestDist = d; best = node.id }
+        }
+        return best
+    }
+
     private func nodeDrag(_ n:MashNodeData, sz:CGSize) -> some Gesture {
         DragGesture(minimumDistance:5, coordinateSpace:.local)
             .onChanged { val in
