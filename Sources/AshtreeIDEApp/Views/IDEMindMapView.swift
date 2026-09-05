@@ -734,6 +734,13 @@ struct MashCanvasView: View {
                     }
                     .disabled(!store.canUndo(doc.id))
                     .id(store.undoTick)
+                    Button { _ = MashStore.shared.redo() } label: {
+                        Image(systemName:"arrow.uturn.forward")
+                            .font(.system(size:11))
+                            .foregroundColor(store.canRedo(doc.id) ? themeVM.accent : themeVM.dim)
+                    }
+                    .disabled(!store.canRedo(doc.id))
+                    .id(store.undoTick)
                     if vm.selectedId != nil || !vm.selectedIds.isEmpty {
                         Button { vm.deleteSelected(doc:doc) } label: {
                             Image(systemName:"trash").font(.system(size:11)).foregroundColor(.red)
@@ -1554,6 +1561,11 @@ struct MashNodeEditorSheet: View {
     @State private var type:   MashNodeType = .note
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
+    // Custom colours — any colour, not limited to the theme presets
+    @State private var useCustomColors = false
+    @State private var fillCol:   Color = Color(hex:"#00ffcc")
+    @State private var borderCol: Color = Color(hex:"#00ffcc")
+    @State private var textCol:   Color = .white
     // FocusState MUST be at this level, not inside NavigationView
     @FocusState private var labelFocused: Bool
 
@@ -1627,6 +1639,23 @@ struct MashNodeEditorSheet: View {
                             Toggle("Bold",   isOn: $bold).tint(themeVM.accent)
                             Toggle("Italic", isOn: $italic).tint(themeVM.accent)
                         }
+
+                        VStack(alignment:.leading, spacing:10) {
+                            Toggle("Custom Colors", isOn: $useCustomColors)
+                                .tint(themeVM.accent)
+                            if useCustomColors {
+                                ColorPicker("Fill",   selection:$fillCol,   supportsOpacity:false)
+                                ColorPicker("Border", selection:$borderCol, supportsOpacity:false)
+                                ColorPicker("Text",   selection:$textCol,   supportsOpacity:false)
+                            }
+                        }
+                        .font(.system(size:11,design:.monospaced))
+                        .foregroundColor(themeVM.dim)
+                        .padding(12)
+                        .background(Color(hex:"#161b22"))
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius:10)
+                            .stroke(Color(hex:"#30363d"), lineWidth:0.5))
                         .font(.system(size:11,design:.monospaced))
                         .foregroundColor(themeVM.dim)
 
@@ -1655,6 +1684,11 @@ struct MashNodeEditorSheet: View {
             italic = nodeData.italic
             type   = nodeData.type
             if let d = nodeData.imageData { pickedImage = UIImage(data:d) }
+            useCustomColors = nodeData.fillColor != nil || nodeData.borderColor != nil
+                              || nodeData.textColor != nil
+            if let f = nodeData.fillColor   { fillCol   = Color(hex:f) }
+            if let b = nodeData.borderColor { borderCol = Color(hex:b) }
+            if let t = nodeData.textColor   { textCol   = Color(hex:t) }
             // Focus after the sheet animation finishes (~0.6s on iOS)
             DispatchQueue.main.asyncAfter(deadline:.now()+0.65) {
                 labelFocused = true
@@ -1674,6 +1708,16 @@ struct MashNodeEditorSheet: View {
         d.nodes[nodeData.id]?.italic    = italic
         d.nodes[nodeData.id]?.type      = type
         d.nodes[nodeData.id]?.imageData = pickedImage.flatMap { $0.jpegData(compressionQuality: 0.8) }
+        if useCustomColors {
+            d.nodes[nodeData.id]?.fillColor   = fillCol.mashHex()
+            d.nodes[nodeData.id]?.borderColor = borderCol.mashHex()
+            d.nodes[nodeData.id]?.textColor   = textCol.mashHex()
+        } else {
+            d.nodes[nodeData.id]?.fillColor   = nil
+            d.nodes[nodeData.id]?.borderColor = nil
+            d.nodes[nodeData.id]?.textColor   = nil
+        }
+        MashStore.shared.pushHistory(doc)
         store.updateDocument(d)
     }
 
@@ -2294,3 +2338,13 @@ struct NodeImagePickerSheet: View {
 }
 
 // ShareSheet is defined in IDEMainView.swift
+
+// MARK: - Color → hex string (custom node colours)
+extension Color {
+    func mashHex() -> String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(format: "#%02X%02X%02X",
+                      Int((r*255).rounded()), Int((g*255).rounded()), Int((b*255).rounded()))
+    }
+}
