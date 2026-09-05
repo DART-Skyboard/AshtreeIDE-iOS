@@ -439,6 +439,31 @@ public final class MashStore: ObservableObject {
         save()
     }
 
+    // ── Unlimited undo history ───────────────────────────
+    private var undoStack: [MashDocument] = []
+
+    /// Snapshot the CURRENT state before a mutation. Call before changing.
+    public func pushHistory(_ doc: MashDocument) {
+        undoStack.append(doc)
+    }
+
+    public var canUndo: Bool { !undoStack.isEmpty }
+
+    /// Restore the most recent snapshot. Returns false when history is empty.
+    @discardableResult
+    public func undo() -> Bool {
+        guard let prev = undoStack.popLast() else { return false }
+        if let idx = documents.firstIndex(where: { $0.id == prev.id }) {
+            var d = prev; d.modified = Date().timeIntervalSince1970
+            documents[idx] = d
+            save()
+            return true
+        }
+        return false
+    }
+
+    public func clearHistory() { undoStack.removeAll() }
+
     public func updateDocument(_ doc: MashDocument) {
         if let idx = documents.firstIndex(where: { $0.id == doc.id }) {
             var d = doc; d.modified = Date().timeIntervalSince1970
