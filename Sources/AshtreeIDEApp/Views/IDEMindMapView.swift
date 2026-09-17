@@ -377,21 +377,6 @@ class MashCanvasVM: ObservableObject {
         }
     }
 
-/// Resolves a document's effective MashTheme: color fields come from
-/// customTheme (if a legacy snapshot exists) or the built-in theme by
-/// themeId, exactly as before — but connectionStyle specifically is
-/// layered on top from connectionStyleOverride when one is set. This
-/// is the single source of truth every renderer, toolbar control, and
-/// exporter should read from, so a curve-style change is never able
-/// to shadow a later color-theme change again.
-func effectiveTheme(_ doc: MashDocument) -> MashTheme {
-    var t = doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
-    if let override = doc.connectionStyleOverride {
-        t.connectionStyle = override
-    }
-    return t
-}
-
 
     func applyAutoLayout(doc: inout MashDocument) {
         switch doc.layout {
@@ -431,6 +416,22 @@ func effectiveTheme(_ doc: MashDocument) -> MashTheme {
         for(i,cid)in ch.enumerated(){doc.nodes[cid]?.x=CGFloat(i)*200-CGFloat(ch.count-1)*100; doc.nodes[cid]?.y=0}
     }
 }
+
+/// Resolves a document's effective MashTheme: color fields come from
+/// customTheme (if a legacy snapshot exists) or the built-in theme by
+/// themeId, exactly as before — but connectionStyle specifically is
+/// layered on top from connectionStyleOverride when one is set. This
+/// is the single source of truth every renderer, toolbar control, and
+/// exporter should read from, so a curve-style change is never able
+/// to shadow a later color-theme change again.
+func effectiveTheme(_ doc: MashDocument) -> MashTheme {
+    var t = doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
+    if let override = doc.connectionStyleOverride {
+        t.connectionStyle = override
+    }
+    return t
+}
+
 
 // MARK: - Main Entry
 
