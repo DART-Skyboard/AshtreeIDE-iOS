@@ -377,6 +377,22 @@ class MashCanvasVM: ObservableObject {
         }
     }
 
+/// Resolves a document's effective MashTheme: color fields come from
+/// customTheme (if a legacy snapshot exists) or the built-in theme by
+/// themeId, exactly as before — but connectionStyle specifically is
+/// layered on top from connectionStyleOverride when one is set. This
+/// is the single source of truth every renderer, toolbar control, and
+/// exporter should read from, so a curve-style change is never able
+/// to shadow a later color-theme change again.
+func effectiveTheme(_ doc: MashDocument) -> MashTheme {
+    var t = doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
+    if let override = doc.connectionStyleOverride {
+        t.connectionStyle = override
+    }
+    return t
+}
+
+
     func applyAutoLayout(doc: inout MashDocument) {
         switch doc.layout {
         case .radial:   radial(doc:&doc, id:doc.rootId, cx:0, cy:0, sa:0, ea:2 * .pi, depth:0)
@@ -707,14 +723,16 @@ struct MashCanvasView: View {
                             .font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(.orange)
                             .padding(.horizontal,8).padding(.vertical,4).background(Color.orange.opacity(0.15)).cornerRadius(6)
                     }
-                    // Curve style toggle: bezier ↔ flowchart
+                    // Curve style toggle — an independent override, never
+                    // touches customTheme, so switching color themes later
+                    // (via the Theme sheet) is never shadowed by this.
                     Button {
                         var d = doc
-                        d.customTheme = d.customTheme ?? MashTheme.builtIn.first{$0.id==d.themeId} ?? MashTheme.builtIn[0]
-                        d.customTheme!.connectionStyle = d.customTheme!.connectionStyle == .straight ? .curved : .straight
+                        let current = d.connectionStyleOverride ?? effectiveTheme(d).connectionStyle
+                        d.connectionStyleOverride = current == .straight ? .curved : .straight
                         MashStore.shared.updateDocument(d)
                     } label: {
-                        let isFlowchart = (doc.customTheme?.connectionStyle ?? (MashTheme.builtIn.first{$0.id==doc.themeId} ?? MashTheme.builtIn[0]).connectionStyle) == .straight
+                        let isFlowchart = (doc.connectionStyleOverride ?? effectiveTheme(doc).connectionStyle) == .straight
                         Image(systemName: isFlowchart ? "arrow.turn.right.down" : "bezier")
                             .font(.system(size:11)).foregroundColor(isFlowchart ? .orange : themeVM.accent)
                             .padding(5).background((isFlowchart ? Color.orange : themeVM.accent).opacity(0.1))
@@ -964,9 +982,7 @@ struct MashCanvas: View {
     @ObservedObject var vm: MashCanvasVM
     @EnvironmentObject var themeVM: IDEThemeViewModel
 
-    var theme: MashTheme {
-        doc.customTheme ?? MashTheme.builtIn.first{$0.id==doc.themeId} ?? MashTheme.builtIn[0]
-    }
+    var theme: MashTheme { effectiveTheme(doc) }
 
     var body: some View {
         GeometryReader { geo in
@@ -1326,6 +1342,14 @@ struct MashCanvas: View {
             let mx=fs.x+(ts.x-fs.x)*0.5
             path.move(to:fs); path.addLine(to:CGPoint(x:mx,y:fs.y))
             path.addLine(to:CGPoint(x:mx,y:ts.y)); path.addLine(to:ts)
+        case .circuit:
+            // PCB-trace routing: horizontal run, then vertical, then
+            // horizontal — three straight segments with sharp right-
+            // angle corners, no diagonals. Matches the web app's
+            // Circuit curve style for schematic/circuit diagrams.
+            let midX=fs.x+(ts.x-fs.x)*0.6
+            path.move(to:fs); path.addLine(to:CGPoint(x:midX,y:fs.y))
+            path.addLine(to:CGPoint(x:midX,y:ts.y)); path.addLine(to:ts)
         }
         let w=lw*min(1.5,vm.scale+0.3)
         ctx.stroke(path,with:.color(color),style:StrokeStyle(lineWidth:w,lineCap:.round,lineJoin:.round,dash:dashed ? [6,4]:[]))
@@ -1828,7 +1852,9 @@ struct MashThemeSheet: View {
                 }
                 ToolbarItem(placement:.navigationBarTrailing) {
                     Button("Apply") {
-                        var d = doc; d.themeId = selectedThemeId
+                        var d = doc
+                        d.themeId = selectedThemeId
+                        d.customTheme = nil   // never let a stale snapshot shadow this pick
                         store.updateDocument(d); isPresented = false
                     }
                     .font(.system(size:11,weight:.semibold,design:.monospaced))
@@ -1979,7 +2005,7 @@ struct MashExportSheet: View {
         let data = renderer.pdfData { ctx in
             ctx.beginPage()
             let c = ctx.cgContext
-            let theme = doc.customTheme ?? MashTheme.builtIn.first { $0.id == doc.themeId } ?? MashTheme.builtIn[0]
+            let theme = effectiveTheme(doc)
             // Background
             c.setFillColor(UIColor(Color(hex:theme.canvasBackground)).cgColor)
             c.fill(CGRect(x:0,y:0,width:pageW,height:pageH))
@@ -2024,7 +2050,7 @@ struct MashExportSheet: View {
     private func exportPNG(transparent: Bool) {
         let exportPxScale: CGFloat = 2.0
         let size  = CGSize(width:1600, height:1200)
-        let theme = doc.customTheme ?? MashTheme.builtIn.first{$0.id==doc.themeId} ?? MashTheme.builtIn[0]
+        let theme = effectiveTheme(doc)
 
         UIGraphicsBeginImageContextWithOptions(size, !transparent, exportPxScale)
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
