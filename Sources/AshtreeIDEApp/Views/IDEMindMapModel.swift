@@ -61,6 +61,7 @@ public enum MashConnectionStyle: String, Codable {
     case curved     = "curved"      // Smooth bezier
     case straight   = "straight"    // 90° flowchart
     case organic    = "organic"     // Catmull-Rom
+    case circuit    = "circuit"     // PCB-trace routing: horizontal/vertical/horizontal, sharp right angles
 }
 
 public enum MashArrowType: String, Codable {
@@ -307,6 +308,11 @@ public struct MashDocument: Codable {
     public var modified:     Double
     public var themeId:      String
     public var customTheme:  MashTheme?
+    /// Curve style chosen independently of the color theme. nil means
+    /// "inherit whatever the active theme specifies" — this is the fix
+    /// for the bug where toggling curve style froze a customTheme
+    /// snapshot that then silently overrode every later theme pick.
+    public var connectionStyleOverride: MashConnectionStyle?
     public var nodes:        [String: MashNodeData]  // id → serializable data
     public var rootId:       String
     public var connections:  [MashConnection]
@@ -327,6 +333,7 @@ public struct MashDocument: Codable {
         return MashDocument(id: UUID().uuidString, title: title,
                             created: now, modified: now,
                             themeId: "dark-ash", customTheme: nil,
+                            connectionStyleOverride: nil,
                             nodes: [rootId: root], rootId: rootId,
                             connections: [], canvasOffset: .zero,
                             canvasScale: 1.0, layout: .radial)
