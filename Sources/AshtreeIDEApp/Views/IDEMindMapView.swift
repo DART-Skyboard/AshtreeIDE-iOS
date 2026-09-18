@@ -707,6 +707,7 @@ struct MashCanvasView: View {
                 .environmentObject(themeVM)
 
             VStack {
+                ScrollView(.horizontal, showsIndicators:false) {
                 HStack(spacing:8) {
                     Button { showDocList = true } label: {
                         HStack(spacing:4) {
@@ -724,24 +725,72 @@ struct MashCanvasView: View {
                             .font(.system(size:8,weight:.semibold,design:.monospaced)).foregroundColor(.orange)
                             .padding(.horizontal,8).padding(.vertical,4).background(Color.orange.opacity(0.15)).cornerRadius(6)
                     }
-                    // Curve style toggle — an independent override, never
-                    // touches customTheme, so switching color themes later
-                    // (via the Theme sheet) is never shadowed by this.
-                    Button {
-                        var d = doc
-                        let current = d.connectionStyleOverride ?? effectiveTheme(d).connectionStyle
-                        d.connectionStyleOverride = current == .straight ? .curved : .straight
-                        MashStore.shared.updateDocument(d)
+                    // ── Compact header dropdowns: Layout · Curve · Theme ──
+                    // Replaces the old full-screen MashThemeSheet and the
+                    // binary curve-toggle button with three quick Menu
+                    // pickers, matching the web app's inline <select>
+                    // pattern — no view ever takes over the whole screen.
+                    Menu {
+                        ForEach(MashLayout.allCases, id:\.self) { l in
+                            Button {
+                                var d = doc; d.layout = l
+                                vm.applyAutoLayout(doc: &d)
+                                MashStore.shared.updateDocument(d)
+                            } label: {
+                                if doc.layout == l { Label(l.displayName, systemImage:"checkmark") }
+                                else { Text(l.displayName) }
+                            }
+                        }
                     } label: {
-                        let isFlowchart = (doc.connectionStyleOverride ?? effectiveTheme(doc).connectionStyle) == .straight
-                        Image(systemName: isFlowchart ? "arrow.turn.right.down" : "bezier")
-                            .font(.system(size:11)).foregroundColor(isFlowchart ? .orange : themeVM.accent)
-                            .padding(5).background((isFlowchart ? Color.orange : themeVM.accent).opacity(0.1))
-                            .cornerRadius(6)
+                        HStack(spacing:3) {
+                            Text(doc.layout.displayName).font(.system(size:8,weight:.semibold,design:.monospaced))
+                            Image(systemName:"chevron.down").font(.system(size:6,weight:.bold))
+                        }
+                        .foregroundColor(themeVM.accent)
+                        .padding(.horizontal,7).padding(.vertical,4)
+                        .background(themeVM.accent.opacity(0.1)).cornerRadius(5)
                     }
-                    Button { vm.cycleLayout(doc:doc) } label: {
-                        Text(doc.layout.displayName).font(.system(size:8,design:.monospaced)).foregroundColor(themeVM.accent)
-                            .padding(.horizontal,6).padding(.vertical,4).background(themeVM.accent.opacity(0.1)).cornerRadius(5)
+                    Menu {
+                        ForEach(MashConnectionStyle.allCases, id:\.self) { c in
+                            Button {
+                                var d = doc; d.connectionStyleOverride = c
+                                MashStore.shared.updateDocument(d)
+                            } label: {
+                                let active = (doc.connectionStyleOverride ?? effectiveTheme(doc).connectionStyle) == c
+                                if active { Label(c.displayName, systemImage:"checkmark") }
+                                else { Text(c.displayName) }
+                            }
+                        }
+                    } label: {
+                        let curveName = (doc.connectionStyleOverride ?? effectiveTheme(doc).connectionStyle).displayName
+                        HStack(spacing:3) {
+                            Text(curveName).font(.system(size:8,weight:.semibold,design:.monospaced))
+                            Image(systemName:"chevron.down").font(.system(size:6,weight:.bold))
+                        }
+                        .foregroundColor(.orange)
+                        .padding(.horizontal,7).padding(.vertical,4)
+                        .background(Color.orange.opacity(0.1)).cornerRadius(5)
+                    }
+                    Menu {
+                        ForEach(MashTheme.builtIn) { t in
+                            Button {
+                                var d = doc
+                                d.themeId = t.id
+                                d.customTheme = nil   // never let a stale snapshot shadow this pick
+                                MashStore.shared.updateDocument(d)
+                            } label: {
+                                if doc.themeId == t.id && doc.customTheme == nil { Label(t.name, systemImage:"checkmark") }
+                                else { Text(t.name) }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing:3) {
+                            Image(systemName:"paintpalette.fill").font(.system(size:9))
+                            Image(systemName:"chevron.down").font(.system(size:6,weight:.bold))
+                        }
+                        .foregroundColor(themeVM.accent)
+                        .padding(.horizontal,7).padding(.vertical,4)
+                        .background(themeVM.accent.opacity(0.1)).cornerRadius(5)
                     }
                     Button { vm.scale=1.0; vm.offset = .zero; vm.baseScale=1.0 } label: {
                         Image(systemName:"arrow.up.left.and.arrow.down.right").font(.system(size:11)).foregroundColor(themeVM.dim)
@@ -767,6 +816,7 @@ struct MashCanvasView: View {
                     }
                 }
                 .padding(.horizontal,12).padding(.vertical,8)
+                }
                 .frame(maxWidth:.infinity)
                 .background(.ultraThinMaterial)
                 HStack {
@@ -875,8 +925,6 @@ struct MashSideToolbar: View {
         ToolItem(icon:"arrow.right")                 { vm.tool = vm.tool == .connectSingle ? .select : .connectSingle },
         // Marquee select
         ToolItem(icon:"rectangle.dashed.badge.plus") { vm.tool = vm.tool == .marquee ? .select : .marquee },
-        // Theme
-        ToolItem(icon:"paintpalette.fill")           { showThemePicker = true },
         // Image node
         ToolItem(icon:"photo.badge.plus")            { vm.addImageNode(doc:doc) },
         // ASH coding node types (always available, especially useful in ASH template)
