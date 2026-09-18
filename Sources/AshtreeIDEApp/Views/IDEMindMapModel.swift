@@ -57,11 +57,20 @@ public enum MashNodeType: String, Codable, CaseIterable {
 
 // MARK: - Connection Style
 
-public enum MashConnectionStyle: String, Codable {
+public enum MashConnectionStyle: String, Codable, CaseIterable {
     case curved     = "curved"      // Smooth bezier
     case straight   = "straight"    // 90° flowchart
     case organic    = "organic"     // Catmull-Rom
     case circuit    = "circuit"     // PCB-trace routing: horizontal/vertical/horizontal, sharp right angles
+
+    public var displayName: String {
+        switch self {
+        case .curved:   return "Curved"
+        case .straight: return "Straight"
+        case .organic:  return "Organic"
+        case .circuit:  return "Circuit"
+        }
+    }
 }
 
 public enum MashArrowType: String, Codable {
