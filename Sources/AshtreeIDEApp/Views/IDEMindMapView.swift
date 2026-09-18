@@ -697,6 +697,8 @@ struct MashCanvasView: View {
     @State private var showNodeEditor     = false
     @State private var showThemePicker    = false
     @State private var showExport         = false
+    @State private var showImport         = false
+    @State private var importAlert: String? = nil
     @State private var showDocList        = false
     @State private var showNewDoc         = false
     @State private var showLoadFromEditor = false
@@ -849,6 +851,36 @@ struct MashCanvasView: View {
         .sheet(isPresented: $showExport) {
             MashExportSheet(doc:doc,isPresented:$showExport).environmentObject(themeVM)
         }
+        .fileImporter(isPresented: $showImport,
+                      allowedContentTypes: [.item],
+                      allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let data = try Data(contentsOf: url)
+                    let imported = try MashImport.fromFile(filename: url.lastPathComponent, data: data)
+                    MashStore.shared.documents.append(imported)
+                    MashStore.shared.activeDocId = imported.id
+                    MashStore.shared.save()
+                    importAlert = "Imported \"\(imported.title)\""
+                } catch {
+                    importAlert = "Import failed: \(error.localizedDescription)"
+                }
+            case .failure(let error):
+                importAlert = "Import failed: \(error.localizedDescription)"
+            }
+        }
+        .alert("Import", isPresented: Binding(
+            get: { importAlert != nil },
+            set: { if !$0 { importAlert = nil } }
+        )) {
+            Button("OK", role: .cancel) { importAlert = nil }
+        } message: {
+            Text(importAlert ?? "")
+        }
         .sheet(isPresented: $showDocList) {
             MashDocListSheet(isPresented:$showDocList).environmentObject(themeVM)
         }
@@ -935,6 +967,8 @@ struct MashSideToolbar: View {
         ToolItem(icon:"arrow.down.to.line")      { vm.addASHNode(doc:doc, type:.inputForm) },
         ToolItem(icon:"arrow.up.from.line")      { vm.addASHNode(doc:doc, type:.outputForm) },
         ToolItem(icon:"arrowshape.turn.up.left") { vm.addASHNode(doc:doc, type:.returnNode) },
+        // Import (MASH / FreeMind .mm / OPML)
+        ToolItem(icon:"square.and.arrow.down")       { showImport = true },
         // Export
         ToolItem(icon:"square.and.arrow.up")         { showExport = true },
         // Load code into map
