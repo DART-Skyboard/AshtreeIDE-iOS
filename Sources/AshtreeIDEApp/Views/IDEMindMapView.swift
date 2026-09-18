@@ -1159,6 +1159,7 @@ struct MashCanvas: View {
                     }
                 }
                 .frame(width:sz.width,height:sz.height)
+                .coordinateSpace(name:"mashCanvasSpace")
                 .clipped()
                 // Pan as simultaneousGesture: fires alongside node gestures,
                 // blocked only when isDraggingNode is true
@@ -1255,12 +1256,15 @@ struct MashCanvas: View {
             .shadow(color: Color(hex:"#00ffcc").opacity(connected ? 0.6 : 0), radius: 4)
             .contentShape(Circle().inset(by: -10))
             .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("mashCanvasSpace"))
                     .onChanged { val in
                         if vm.socketFromId == nil {
                             vm.socketFromId  = n.id
                             vm.socketIsInput = isInput
                         }
+                        // val.location is now in the same space worldToScreen()
+                        // renders into, so the wire endpoint tracks the finger
+                        // exactly — this is what was "shooting off elsewhere".
                         vm.socketPoint = val.location
                     }
                     .onEnded { val in
