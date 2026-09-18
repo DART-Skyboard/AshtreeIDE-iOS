@@ -837,6 +837,7 @@ struct MashCanvasView: View {
         .overlay(
             MashSideToolbar(doc: doc, vm: vm,
                 showThemePicker:    $showThemePicker,
+                showImport:         $showImport,
                 showExport:         $showExport,
                 showDocList:        $showDocList,
                 showNewDoc:         $showNewDoc,
@@ -927,6 +928,7 @@ struct MashSideToolbar: View {
     let doc: MashDocument
     @ObservedObject var vm: MashCanvasVM
     @Binding var showThemePicker:     Bool
+    @Binding var showImport:          Bool
     @Binding var showExport:          Bool
     @Binding var showDocList:         Bool
     @Binding var showNewDoc:          Bool
