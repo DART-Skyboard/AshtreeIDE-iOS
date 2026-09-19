@@ -31,9 +31,10 @@ public struct AshAST {
     public var name: String
     public var children: [AshAST]
     public var value: String
+    public var dest: String?
 
-    public init(type: String, name: String = "", value: String = "", children: [AshAST] = []) {
-        self.type = type; self.name = name; self.value = value; self.children = children
+    public init(type: String, name: String = "", value: String = "", children: [AshAST] = [], dest: String? = nil) {
+        self.type = type; self.name = name; self.value = value; self.children = children; self.dest = dest
     }
 }
 
@@ -176,12 +177,20 @@ public final class LeatrEngine: ObservableObject {
                 advance(); continue
             }
 
-            // (NodeName):-:{ or node ref
+            // (NodeName):-:{ or node ref — depth-tracked so a nested
+            // paren, like irout ("..." placeto (velocity)), doesn't
+            // truncate at the first inner ")" and leave the outer one
+            // dangling as a stray character.
             if c == "(" {
                 var j = source.index(after: i)
-                while j < source.endIndex && source[j] != ")" { j = source.index(after: j) }
+                var depth = 1
+                while j < source.endIndex && depth > 0 {
+                    if source[j] == "(" { depth += 1 }
+                    else if source[j] == ")" { depth -= 1 }
+                    if depth > 0 { j = source.index(after: j) }
+                }
+                let inner = String(source[source.index(after: i)..<j])
                 if j < source.endIndex { j = source.index(after: j) }
-                let inner = String(source[source.index(after: i)..<source.index(before: j)])
                 let afterParen = String(source[j...]).trimmingCharacters(in: .whitespaces)
                 if afterParen.hasPrefix(":-:") {
                     // Find {
@@ -274,16 +283,62 @@ public final class LeatrEngine: ObservableObject {
                     if inner.kind == .outerTag || inner.kind == .innerTag ||
                        inner.kind == .polyTag  || inner.kind == .netTag {
                         node.children.append(AshAST(type: "TagAnnotation", value: inner.value))
+                    } else if inner.kind == .keyword && inner.value == "thenplace" {
+                        // thenplace var (dest) with var (src) — copies src's
+                        // current value into dest at runtime. Shape is
+                        // fixed: keyword, declaration:var, varRef,
+                        // declaration:with, declaration:var, varRef.
+                        var j = i + 1
+                        func isDecl(_ idx: Int, _ val: String) -> Bool {
+                            idx < tokens.count && tokens[idx].kind == .declaration && tokens[idx].value == val
+                        }
+                        if isDecl(j, "var"), j+1 < tokens.count, tokens[j+1].kind == .varRef {
+                            let dest = String(tokens[j+1].value.dropFirst().dropLast())
+                            j += 2
+                            if isDecl(j, "with"), isDecl(j+1, "var"), j+2 < tokens.count, tokens[j+2].kind == .varRef {
+                                let src = String(tokens[j+2].value.dropFirst().dropLast())
+                                node.children.append(AshAST(type: "KeywordStatement", name: "thenplace", value: src, dest: dest))
+                                i = j + 2
+                            } else {
+                                node.children.append(AshAST(type: "KeywordStatement", name: "thenplace", value: "", dest: dest))
+                                i = j - 1
+                            }
+                        } else {
+                            node.children.append(AshAST(type: "KeywordStatement", name: "thenplace", value: ""))
+                        }
                     } else if inner.kind == .keyword {
-                        let val = (i+1 < tokens.count && tokens[i+1].kind == .string)
-                            ? tokens[i+1].value : ""
-                        node.children.append(AshAST(type: "KeywordStatement",
-                                                    name: inner.value, value: val))
-                        if !val.isEmpty { i += 1 }
+                        // A keyword's payload is one following token: a
+                        // string literal ("Data: ..."), or a parenthesized
+                        // blob — which may mix a string prefix with a
+                        // placeto(var) ref, as irout does: irout ("Result: "
+                        // placeto (velocity)). Nested parens are depth-
+                        // tracked by the lexer, so that whole blob arrives
+                        // as ONE varRef/nodeRef token whose inner text
+                        // still needs unwrapping.
+                        let next = (i+1 < tokens.count) ? tokens[i+1] : nil
+                        var val = ""
+                        if let n = next, n.kind == .string {
+                            val = String(n.value.dropFirst().dropLast())
+                            i += 1
+                        } else if let n = next, n.kind == .varRef || n.kind == .nodeRef {
+                            var raw = String(n.value.dropFirst().dropLast())
+                            raw = raw.replacingOccurrences(of: "\"", with: "")
+                            if let range = raw.range(of: #"\bplaceto\s*\(([^)]+)\)"#, options: .regularExpression) {
+                                let matched = String(raw[range])
+                                if let inner2 = matched.range(of: #"\(([^)]+)\)"#, options: .regularExpression) {
+                                    let argText = String(matched[inner2]).dropFirst().dropLast()
+                                    raw.replaceSubrange(range, with: String(argText))
+                                }
+                            }
+                            val = raw.trimmingCharacters(in: .whitespaces)
+                            i += 1
+                        }
+                        node.children.append(AshAST(type: "KeywordStatement", name: inner.value, value: val))
                     } else if inner.kind == .naturalTool {
                         node.children.append(AshAST(type: "NaturalToolCall", name: inner.value))
                     } else if inner.kind == .declaration && inner.value == "var" {
-                        let vName = (i+1 < tokens.count) ? tokens[i+1].value : ""
+                        let raw = (i+1 < tokens.count) ? tokens[i+1].value : ""
+                        let vName = raw.hasPrefix("(") && raw.hasSuffix(")") ? String(raw.dropFirst().dropLast()) : raw
                         node.children.append(AshAST(type: "VarDeclaration", name: vName))
                         i += 1
                     } else if inner.kind == .importStmt {
