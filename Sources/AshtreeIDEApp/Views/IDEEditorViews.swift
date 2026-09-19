@@ -357,35 +357,11 @@ struct IDESaveSheet: View {
     }
 }
 
-// MARK: - Compiler Output View (split: text top, GL scene bottom when import (GLDrivers) detected)
+// MARK: - Compiler Output View (text-only — graphical output moved to its own always-present Interface tab)
 
 struct IDECompilerOutputView: View {
-    @EnvironmentObject var themeVM: IDEThemeViewModel
-    @EnvironmentObject var ideVM:   IDEState
-    @EnvironmentObject var mazeVM:  MazeViewModel
-    @State private var glPanelKey = UUID()  // forces GL panel to rebuild on each compile
-
-    var hasGLOutput: Bool {
-        ideVM.sourceCode.contains("import (GLDrivers)") || ideVM.sourceCode.contains("gl.scene")
-            || ideVM.sourceCode.contains("ArcEdge") || ideVM.sourceCode.contains("ArcVector")
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            if hasGLOutput {
-                // Split: compiler output top, 3D GL scene bottom
-                IDECompilerTextPanel()
-                    .frame(maxHeight: .infinity)
-
-                Divider().background(themeVM.accent.opacity(0.3))
-
-                IDEGLOutputPanel()
-                    .id(ideVM.compiler.compilerLines.count)
-                    .frame(maxHeight: .infinity)
-            } else {
-                IDECompilerTextPanel()
-            }
-        }
+        IDECompilerTextPanel()
     }
 }
 
