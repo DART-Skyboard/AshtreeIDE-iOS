@@ -134,39 +134,8 @@ struct IDETabContent: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(IDETab.allCases, id: \.self) { tab in
-                        Button {
+                        IDETabButton(tab: tab, isSelected: ideVM.selectedTab == tab) {
                             withAnimation(.easeInOut(duration: 0.18)) { ideVM.selectedTab = tab }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: tab.icon)
-                                    .font(.system(size: 10,
-                                          weight: ideVM.selectedTab == tab ? .bold : .semibold))
-                                Text(tab.rawValue)
-                                    .font(.system(size: 10,
-                                          weight: ideVM.selectedTab == tab ? .bold : .semibold,
-                                          design: .monospaced))
-                            }
-                            .foregroundColor(ideVM.selectedTab == tab ? .black : themeVM.accent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(ideVM.selectedTab == tab
-                                        ? themeVM.accent
-                                        : themeVM.accent.opacity(0.13))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(themeVM.accent.opacity(
-                                        ideVM.selectedTab == tab ? 0 : 0.35), lineWidth: 0.5)
-                            )
-                            .frame(height: 36)
-                            .overlay(
-                                Rectangle()
-                                    .fill(ideVM.selectedTab == tab ? themeVM.accent : .clear)
-                                    .frame(height: 2),
-                                alignment: .bottom
-                            )
                         }
                     }
                 }
@@ -194,7 +163,6 @@ struct IDETabContent: View {
                     IDEInterfaceView()
                         .environmentObject(themeVM)
                         .environmentObject(ideVM)
-                        .environmentObject(mazeVM)
                 case .files:    IDEFilesView()
                 case .maze:     IDEMazeView()
                 case .mindmap:
@@ -205,6 +173,47 @@ struct IDETabContent: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+// Extracted from IDETabContent's ForEach — a single combined tab-bar
+// button expression (icon + label + all the selected/unselected
+// styling) was tipping the type-checker over its complexity ceiling
+// once a 4th... well, 9th tab (.interface) was added to IDETab. A
+// small standalone view with real parameters type-checks trivially.
+struct IDETabButton: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    let tab: IDETab
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 10, weight: isSelected ? .bold : .semibold))
+                Text(tab.rawValue)
+                    .font(.system(size: 10, weight: isSelected ? .bold : .semibold, design: .monospaced))
+            }
+            .foregroundColor(isSelected ? .black : themeVM.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? themeVM.accent : themeVM.accent.opacity(0.13))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(themeVM.accent.opacity(isSelected ? 0 : 0.35), lineWidth: 0.5)
+            )
+            .frame(height: 36)
+            .overlay(
+                Rectangle()
+                    .fill(isSelected ? themeVM.accent : .clear)
+                    .frame(height: 2),
+                alignment: .bottom
+            )
         }
     }
 }
