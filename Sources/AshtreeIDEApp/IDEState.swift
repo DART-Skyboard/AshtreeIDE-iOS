@@ -4,18 +4,19 @@ import SwiftUI
 import Combine
 
 public enum IDETab: String, CaseIterable {
-    case editor = "Editor", output = "Output", terminal = "Terminal"
+    case editor = "Editor", output = "Output", terminal = "Terminal", interface = "Interface"
     case files = "Files", maze = "Maze", mindmap = "Ash Map", docs = "Docs", help = "Help"
     public var icon: String {
         switch self {
-        case .editor:   return "chevron.left.forwardslash.chevron.right"
-        case .output:   return "text.alignleft"
-        case .terminal: return "terminal"
-        case .files:    return "folder"
-        case .maze:     return "puzzlepiece"
-        case .mindmap:  return "brain.head.profile"
-        case .docs:     return "book"
-        case .help:     return "questionmark.circle"
+        case .editor:    return "chevron.left.forwardslash.chevron.right"
+        case .output:    return "text.alignleft"
+        case .terminal:  return "terminal"
+        case .interface: return "macwindow"
+        case .files:     return "folder"
+        case .maze:      return "puzzlepiece"
+        case .mindmap:   return "brain.head.profile"
+        case .docs:      return "book"
+        case .help:      return "questionmark.circle"
         }
     }
 }
@@ -72,6 +73,11 @@ public final class IDEState: ObservableObject {
     public func buildAndRun(netMode: Bool = false) async {
         isCompiling = true
         compiler.compile(source: sourceCode, netMode: netMode)
+        // Build & Run genuinely runs the program, not just compiles it —
+        // same as typing "run" in the terminal — so Terminal always
+        // reflects a program that has actually executed by the time the
+        // build finishes.
+        compiler.handleTerminalCommand("run", source: sourceCode)
         try? await Task.sleep(nanoseconds: 100_000_000)
         isCompiling = false
         selectedTab = .output
