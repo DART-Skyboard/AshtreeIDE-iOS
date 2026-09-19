@@ -190,6 +190,11 @@ struct IDETabContent: View {
                             .environmentObject(ideVM)
                     }
                 case .terminal: IDETerminalView()
+                case .interface:
+                    IDEInterfaceView()
+                        .environmentObject(themeVM)
+                        .environmentObject(ideVM)
+                        .environmentObject(mazeVM)
                 case .files:    IDEFilesView()
                 case .maze:     IDEMazeView()
                 case .mindmap:
