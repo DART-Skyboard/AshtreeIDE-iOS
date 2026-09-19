@@ -491,21 +491,64 @@ public final class LeatrEngine: ObservableObject {
         await MainActor.run { isDefsLoaded = true }
     }
 
-    // ── Terminal command handler ─────────────────────────────────
+    // ── Real terminal command handling — a live AshRuntime instance
+    // parses the script's actual node/var/irin structure once (on
+    // compile), then set/run/status genuinely operate on that state
+    // for the rest of the session, same as any real interpreter. ──
+    public var runtime: AshRuntime?
+    private var runtimeSource: String?
+
     public func handleTerminalCommand(_ cmd: String, source: String) {
-        let c = cmd.trimmingCharacters(in: .whitespaces).lowercased()
+        let c = cmd.trimmingCharacters(in: .whitespaces)
+        let lc = c.lowercased()
         terminalLines.append(TerminalLine(text: "ash ▸ \(cmd)", color: "#00ffcc", isSystem: false))
-        switch c {
-        case "run":   compile(source: source)
-        case "clear": terminalLines = []; compilerLines = []
-        case "info":
+
+        if runtime == nil || runtimeSource != source {
+            let tokens = lex(source)
+            let ast = parse(tokens)
+            runtime = AshRuntime(ast: ast)
+            runtimeSource = source
+        }
+
+        let parts = c.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        let verb = (parts.first ?? "").lowercased()
+
+        if lc == "run" {
+            compile(source: source)
+            if let rt = runtime {
+                for line in rt.run() {
+                    terminalLines.append(TerminalLine(text: "  → \(line)", color: "#ffffff", isSystem: false))
+                }
+            }
+        } else if lc == "clear" {
+            terminalLines = []; compilerLines = []
+        } else if lc == "status" {
+            if let rt = runtime {
+                let s = rt.status()
+                terminalLines.append(TerminalLine(text: "  \(s.isEmpty ? "(no variables declared)" : s)", color: "#8ab4cc", isSystem: true))
+            } else {
+                terminalLines.append(TerminalLine(text: "  No script compiled yet — type 'run' first.", color: "#ff9500", isSystem: false))
+            }
+        } else if verb == "set", parts.count >= 3 {
+            let varName = parts[1]
+            let value = parts[2...].joined(separator: " ")
+            if let rt = runtime {
+                let result = rt.setVar(varName, value)
+                terminalLines.append(TerminalLine(text: "  \(result.message)", color: result.ok ? "#8ab4cc" : "#ff9500", isSystem: result.ok))
+            } else {
+                terminalLines.append(TerminalLine(text: "  No script compiled yet — type 'run' first.", color: "#ff9500", isSystem: false))
+            }
+        } else if lc == "info" {
             terminalLines.append(TerminalLine(text: "  LEATR v2 · Ash Edge Language · DART Meadow", color: "#8ab4cc", isSystem: true))
             terminalLines.append(TerminalLine(text: "  Compiler Standard: (xa²√xa)±1", color: "#8ab4cc", isSystem: true))
-        case "help":
-            terminalLines.append(TerminalLine(text: "  Commands: run · info · clear · exit · help", color: "#8ab4cc", isSystem: true))
-        case "exit":
+        } else if lc == "help" {
+            terminalLines.append(TerminalLine(text: "  Commands: run · set <var> <value> · status · info · clear · exit · help", color: "#8ab4cc", isSystem: true))
+            if let rt = runtime, !rt.listVars().isEmpty {
+                terminalLines.append(TerminalLine(text: "  Declared variables: \(rt.listVars().joined(separator: ", "))", color: "#8ab4cc", isSystem: true))
+            }
+        } else if lc == "exit" {
             terminalLines.append(TerminalLine(text: "  Session ended.", color: "#4a8a7a", isSystem: true))
-        default:
+        } else {
             terminalLines.append(TerminalLine(text: "  Unknown: '\(cmd)' — type 'help'", color: "#ff9500", isSystem: false))
         }
     }
