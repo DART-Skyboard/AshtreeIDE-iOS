@@ -131,7 +131,7 @@ public final class IDEState: ObservableObject {
     @Published public var localFiles: [String] = []  // filenames saved locally
 
     public let compiler = LeatrEngine()
-    public let examples: [(name: String, icon: String, code: String)] = IDEDefaults.examples
+    public let examples: [(name: String, icon: String, code: String, lang: String)] = IDEDefaults.examples
 
     // MARK: - Compile
 
@@ -152,8 +152,10 @@ public final class IDEState: ObservableObject {
 
     // MARK: - File operations
 
-    public func loadExample(_ code: String, name: String) {
-        openTab(name: name + ".ash", content: code)
+    public func loadExample(_ code: String, name: String, lang: String = "ash") {
+        let ext = IDELanguageEnv.find(id: lang).ext
+        let fname = name.hasSuffix(ext) ? name : name + ext
+        openTab(name: fname, content: code)
     }
 
     public func newFile() {
@@ -297,15 +299,17 @@ public enum IDEDefaults {
   irout ("Result: " placeto (s))
 }|';'|
 """
-    public static let examples: [(name: String, icon: String, code: String)] = [
-        ("Hello World",   "hand.wave",   helloWorld),
-        ("Counter App",   "plusminus",   counterApp),
-        ("Physics Sim",   "atom",        physicsSim),
-        ("Network Node",  "network",     networkNode),
-        ("Autumn Core",   "leaf",        autumnCore),
-        ("3D Animation",  "cube",        ash3D),
-        ("Neural Scene",  "brain.head.profile", neuralScene),
-        ("Arc Edge Vector","waveform",          arcEdgeVector),
+    public static let examples: [(name: String, icon: String, code: String, lang: String)] = [
+        ("Hello World",   "hand.wave",   helloWorld, "ash"),
+        ("Counter App",   "plusminus",   counterApp, "ash"),
+        ("Physics Sim",   "atom",        physicsSim, "ash"),
+        ("Network Node",  "network",     networkNode, "ash"),
+        ("Autumn Core",   "leaf",        autumnCore, "ash"),
+        ("3D Animation",  "cube",        ash3D, "ash"),
+        ("Neural Scene",  "brain.head.profile", neuralScene, "ash"),
+        ("Arc Edge Vector","waveform",          arcEdgeVector, "ash"),
+        ("Reckon Calculator (Ash)", "function", reckonCalculatorAsh, "ash"),
+        ("Reckon Calculator (C++)", "chevron.left.forwardslash.chevron.right", reckonCalculatorConsoleCpp, "cpp"),
     ]
 
     static let helloWorld = """
@@ -538,6 +542,229 @@ import (GLDrivers)
   irout ("Result: " placeto (s))
 }|';\'|
 """
+
+    // ── Reckon Calculator (Ash) — a real, working calculator using the
+    // real Ash runtime's Research(expr) capability: set expr <formula> in
+    // the terminal (or tap the real keypad in the Interface tab) then run
+    // to genuinely evaluate it. Matches the web app's example exactly. ──
+    static let reckonCalculatorAsh = """
+// RECKON CALCULATOR — a real, working calculator in Ash Edge Language
+// Build & Run, then in the Terminal:
+//   set expr 3+4*2       (set the formula - any + - * / ^ expression,
+//                          plus sin(x) cos(x) tan(x) sqrt(x) ln(x)
+//                          log(x) pi e - angles in degrees)
+//   run                  (evaluates expr for real and prints the result)
+// Or open the Interface tab for a real keypad - tap digits/operators,
+// press "=" to evaluate. Both the terminal and the Interface keypad
+// drive the SAME real evaluator (Research below), so anything you can
+// type in one, you can tap in the other.
+{{env:ReckonCalculator}}
+[[script:reckon-calc-v1]]
+[poly: expression-tree]
+
+(CalculatorNode):-: {
+  {{env:ReckonCalculator}}
+  with var (expr) var (s) {
+    irin ("Data: expr=0")
+    Research (expr)
+    thenplace var (s) with var (s)
+  }
+  irout ("Result: " placeto (s))
+}|';\'|
+"""
+
+    // ── Reckon Calculator (C++, console) — genuinely compiles and runs
+    // in the real Judge0/Piston-backed C++ path (which, unlike the web
+    // app's local WASM compiler, has real exception-handling support —
+    // this is the same real recursive-descent evaluator, just written
+    // with its original try/catch/throw error handling since iOS's C++
+    // execution doesn't hit the wall the browser compiler does). ──
+    static let reckonCalculatorConsoleCpp = #"""
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+static const double PI = std::acos(-1.0);
+static const double EULER = std::exp(1.0);
+
+enum class Kind { Num, Op, Lp, Rp, Fn, Const, Post };
+struct Tok { Kind kind; std::string v; };
+struct CalcError : std::runtime_error { using std::runtime_error::runtime_error; };
+
+static double tidy(double n) {
+    if (!std::isfinite(n) || n == 0.0) return n;
+    const double nearest = std::round(n);
+    if (std::fabs(n - nearest) <= std::fabs(n) * 1e-12) return nearest;
+    return n;
+}
+static std::string fmt(double n) {
+    if (!std::isfinite(n)) return "Error";
+    n = tidy(n);
+    if (n == 0.0) return "0";
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.12g", n);
+    return std::string(buf);
+}
+static double factorial(double n) {
+    if (n < 0.0 || std::floor(n) != n) return std::numeric_limits<double>::quiet_NaN();
+    if (n > 170.0) return std::numeric_limits<double>::infinity();
+    double r = 1.0;
+    for (int i = 2; i <= (int)n; ++i) r *= i;
+    return r;
+}
+static double nthRoot(double n, double x) {
+    if (n == 0.0) return std::numeric_limits<double>::quiet_NaN();
+    if (x < 0.0) {
+        if (std::floor(n) == n && std::fmod(std::fabs(n), 2.0) == 1.0) return -std::pow(-x, 1.0 / n);
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::pow(x, 1.0 / n);
+}
+static double applyFn(const std::string& name, double n, bool deg) {
+    const double rad = deg ? n * PI / 180.0 : n;
+    if (name == "sin") return std::sin(rad);
+    if (name == "cos") return std::cos(rad);
+    if (name == "tan") return std::tan(rad);
+    if (name == "ln") return std::log(n);
+    if (name == "exp") return std::exp(n);
+    if (name == "log") return std::log10(n);
+    if (name == "sqrt") return std::sqrt(n);
+    if (name == "cbrt") return std::cbrt(n);
+    if (name == "abs") return std::fabs(n);
+    return std::numeric_limits<double>::quiet_NaN();
+}
+static bool isFnName(const std::string& w) {
+    static const char* names[] = {"sin","cos","tan","ln","exp","log","sqrt","cbrt","abs"};
+    for (auto n : names) if (w == n) return true;
+    return false;
+}
+static std::vector<Tok> tokenize(const std::string& src) {
+    std::vector<Tok> out;
+    size_t i = 0;
+    while (i < src.size()) {
+        char c = src[i];
+        if (std::isspace((unsigned char)c)) { ++i; continue; }
+        if (std::isdigit((unsigned char)c) || c == '.') {
+            size_t j = i;
+            while (j < src.size() && (std::isdigit((unsigned char)src[j]) || src[j] == '.')) ++j;
+            out.push_back({Kind::Num, src.substr(i, j - i)});
+            i = j; continue;
+        }
+        if (c == '(') { out.push_back({Kind::Lp, "("}); ++i; continue; }
+        if (c == ')') { out.push_back({Kind::Rp, ")"}); ++i; continue; }
+        if (c == '+' || c == '-' || c == '*' || c == '/' || c == '^') { out.push_back({Kind::Op, std::string(1, c)}); ++i; continue; }
+        if (c == '!' || c == '%') { out.push_back({Kind::Post, std::string(1, c)}); ++i; continue; }
+        if (std::isalpha((unsigned char)c)) {
+            size_t j = i;
+            while (j < src.size() && std::isalnum((unsigned char)src[j])) ++j;
+            std::string word = src.substr(i, j - i);
+            if (word == "pi" || word == "e") { out.push_back({Kind::Const, word}); i = j; continue; }
+            if (word == "nrt") { out.push_back({Kind::Op, "r"}); i = j; continue; }
+            if (isFnName(word)) { out.push_back({Kind::Fn, word}); i = j; continue; }
+            throw CalcError("Unknown token '" + word + "'");
+        }
+        throw CalcError(std::string("Unexpected character '") + c + "'");
+    }
+    return out;
+}
+class Parser {
+public:
+    const std::vector<Tok>& tokens;
+    bool deg; size_t i = 0;
+    Parser(const std::vector<Tok>& t, bool d) : tokens(t), deg(d) {}
+    const Tok* peek() const { return i < tokens.size() ? &tokens[i] : nullptr; }
+    bool isOp(const char* v) const { const Tok* t = peek(); return t && t->kind == Kind::Op && t->v == v; }
+    bool isPrimaryStart() const {
+        const Tok* t = peek(); if (!t) return false;
+        return t->kind == Kind::Num || t->kind == Kind::Const || t->kind == Kind::Fn || t->kind == Kind::Lp;
+    }
+    const Tok& consume() { if (i >= tokens.size()) throw CalcError("Syntax error"); return tokens[i++]; }
+    double parseExpr() {
+        double v = parseTerm();
+        while (isOp("+") || isOp("-")) { const std::string o = consume().v; const double r = parseTerm(); v = (o == "+") ? v + r : v - r; }
+        return v;
+    }
+    double parseTerm() {
+        double v = parsePower();
+        for (;;) {
+            if (isOp("*") || isOp("/")) {
+                const std::string o = consume().v; const double r = parsePower();
+                if (o == "/") { if (r == 0.0) throw CalcError("Cannot divide by zero"); v /= r; } else v *= r;
+            } else if (isPrimaryStart()) { v *= parsePower(); } else break;
+        }
+        return v;
+    }
+    double parsePower() {
+        const double v = parseUnary();
+        if (isOp("^")) { consume(); return std::pow(v, parsePower()); }
+        if (isOp("r")) { consume(); return nthRoot(v, parsePower()); }
+        return v;
+    }
+    double parseUnary() {
+        if (isOp("-")) { consume(); return -parseUnary(); }
+        if (isOp("+")) { consume(); return parseUnary(); }
+        return parsePostfix();
+    }
+    double parsePostfix() {
+        double v = parsePrimary();
+        while (peek() && peek()->kind == Kind::Post) {
+            const std::string p = consume().v;
+            if (p == "!") { v = factorial(v); if (std::isnan(v)) throw CalcError("Invalid input"); } else v = v / 100.0;
+        }
+        return v;
+    }
+    double parsePrimary() {
+        const Tok* t = peek();
+        if (!t) throw CalcError("Syntax error");
+        if (t->kind == Kind::Num) { consume(); return std::stod(t->v); }
+        if (t->kind == Kind::Const) { consume(); return t->v == "pi" ? PI : EULER; }
+        if (t->kind == Kind::Fn) {
+            const std::string name = consume().v;
+            double arg;
+            if (peek() && peek()->kind == Kind::Lp) {
+                consume(); arg = parseExpr();
+                if (!peek() || peek()->kind != Kind::Rp) throw CalcError("Mismatched parentheses");
+                consume();
+            } else arg = parseUnary();
+            const double r = applyFn(name, arg, deg);
+            if (std::isnan(r)) throw CalcError("Invalid input");
+            return r;
+        }
+        if (t->kind == Kind::Lp) {
+            consume(); const double v = parseExpr();
+            if (!peek() || peek()->kind != Kind::Rp) throw CalcError("Mismatched parentheses");
+            consume(); return v;
+        }
+        throw CalcError("Syntax error");
+    }
+};
+static double evaluate(const std::vector<Tok>& tokens, bool deg) {
+    Parser p(tokens, deg);
+    const double v = p.parseExpr();
+    if (p.i != tokens.size()) throw CalcError("Syntax error");
+    return tidy(v);
+}
+int main() {
+    std::cout << "Reckon (console)\n";
+    std::cout << "Real tokenizer -> recursive-descent parser -> evaluator.\n\n";
+    const char* demo[] = { "2^8", "3 nrt (8+19)", "(1+2)*(3+4)^2", "sqrt(49)", "sin(30)", "5!", "10/0" };
+    for (const char* expr : demo) {
+        std::cout << expr << " = ";
+        try {
+            auto tokens = tokenize(expr);
+            std::cout << fmt(evaluate(tokens, true)) << "\n";
+        } catch (const std::exception& ex) {
+            std::cout << "Error: " << ex.what() << "\n";
+        }
+    }
+    return 0;
+}
+"""#
 
 }
 
