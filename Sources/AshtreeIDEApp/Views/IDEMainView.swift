@@ -482,7 +482,7 @@ struct IDEDrawerFilesTab: View {
                 List {
                     ForEach(ideVM.examples, id: \.name) { ex in
                         Button {
-                            ideVM.loadExample(ex.code, name: ex.name)
+                            ideVM.loadExample(ex.code, name: ex.name, lang: ex.lang)
                             withAnimation { ideVM.showDrawer = false }
                         } label: {
                             Label(ex.name, systemImage: ex.icon).foregroundColor(themeVM.text)
@@ -682,7 +682,8 @@ struct IDELocalFilesSection: View {
                 // Normal mode: restore + new file buttons
                 Button {
                     ideVM.examples.forEach { ex in
-                        let fname = ex.name.lowercased().replacingOccurrences(of:" ",with:"_") + ".ash"
+                        let ext = IDELanguageEnv.find(id: ex.lang).ext
+                        let fname = ex.name.lowercased().replacingOccurrences(of:" ",with:"_") + ext
                         UserDefaults.standard.set(ex.code, forKey:"ide_local_\(fname)")
                         if !ideVM.localFiles.contains(fname) { ideVM.localFiles.append(fname) }
                     }
@@ -1652,7 +1653,7 @@ struct IDEDrawerAboutTab: View {
                     Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                         .foregroundColor(themeVM.accent)
                 }
-                Link(destination: URL(string: "https://radicaldeepscale.com/ashtreeide.html")!) {
+                Link(destination: URL(string: "https://ide.leatr.xyz")!) {
                     Label("Ash Tree IDE Web", systemImage: "safari")
                         .foregroundColor(themeVM.accent)
                 }
