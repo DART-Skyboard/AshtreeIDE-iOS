@@ -14,6 +14,13 @@ struct IDEEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Open-file tab strip — every file loaded via openTab() gets
+            // its own tab with a × close button; only shown once more
+            // than one file is open, or with content unsaved worth a tab.
+            if !ideVM.openTabs.isEmpty {
+                IDEEditorTabStrip()
+            }
+
             // Action bar
             IDEEditorActionBar()
 
@@ -21,6 +28,66 @@ struct IDEEditorView: View {
             AshCodeEditorView()
                 .background(themeVM.bg)
         }
+    }
+}
+
+struct IDEEditorTabStrip: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    @EnvironmentObject var ideVM:   IDEState
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(ideVM.openTabs) { tab in
+                    IDEEditorTabChip(
+                        tab: tab,
+                        isActive: ideVM.activeTabId == tab.id,
+                        onSelect: { ideVM.switchTab(to: tab.id) },
+                        onClose: { ideVM.closeTab(tab.id) }
+                    )
+                }
+            }
+            .padding(.horizontal, 6)
+        }
+        .frame(height: 34)
+        .background(Color(hex: "#0d1117"))
+        .overlay(Divider().background(themeVM.border), alignment: .bottom)
+    }
+}
+
+struct IDEEditorTabChip: View {
+    @EnvironmentObject var themeVM: IDEThemeViewModel
+    let tab: IDEState.OpenTab
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if tab.isDirty {
+                Circle().fill(Color(hex: "#ffd700")).frame(width: 5, height: 5)
+            }
+            Text(tab.name)
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular, design: .monospaced))
+                .foregroundColor(isActive ? themeVM.accent : Color(hex: "#8a97a3"))
+                .lineLimit(1)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(Color(hex: "#4a5568"))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isActive ? themeVM.accent.opacity(0.12) : Color.clear)
+        .overlay(
+            Rectangle().fill(isActive ? themeVM.accent : .clear).frame(height: 2),
+            alignment: .bottom
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
     }
 }
 
