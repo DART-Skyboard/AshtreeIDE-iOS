@@ -27,6 +27,71 @@ public final class IDEState: ObservableObject {
     @Published public var currentFile = "untitled.ash"
     @Published public var isDirty = false
     @Published public var exportFileToDevice = false
+
+    // ── Open-file tabs — every file loaded via openTab() gets a real
+    // tab; switching is instant with buffers kept in memory. sourceCode/
+    // currentFile above stay in sync with the ACTIVE tab, so every
+    // existing call site that reads them keeps working unmodified. ──
+    public struct OpenTab: Identifiable, Equatable {
+        public let id = UUID()
+        public var name: String
+        public var content: String
+        public var isDirty: Bool = false
+    }
+    @Published public var openTabs: [OpenTab] = []
+    @Published public var activeTabId: UUID? = nil
+
+    /// Opens (or switches to, if already open) a file as a real tab.
+    /// This is the one place all file-load call sites should route
+    /// through so the tab strip always reflects what's actually open.
+    public func openTab(name: String, content: String) {
+        saveActiveTabContent()
+        if let idx = openTabs.firstIndex(where: { $0.name == name }) {
+            activeTabId = openTabs[idx].id
+        } else {
+            let tab = OpenTab(name: name, content: content)
+            openTabs.append(tab)
+            activeTabId = tab.id
+        }
+        sourceCode = content
+        currentFile = name
+        isDirty = false
+        selectedTab = .editor
+        IDELanguageStore.shared.setEnvFromFilename(name)
+    }
+
+    public func switchTab(to id: UUID) {
+        guard id != activeTabId, let tab = openTabs.first(where: { $0.id == id }) else { return }
+        saveActiveTabContent()
+        activeTabId = id
+        sourceCode = tab.content
+        currentFile = tab.name
+        isDirty = tab.isDirty
+        IDELanguageStore.shared.setEnvFromFilename(tab.name)
+    }
+
+    public func closeTab(_ id: UUID) {
+        guard let idx = openTabs.firstIndex(where: { $0.id == id }) else { return }
+        let wasActive = activeTabId == id
+        openTabs.remove(at: idx)
+        if openTabs.isEmpty {
+            activeTabId = nil
+            return
+        }
+        if wasActive {
+            let nextIdx = min(idx, openTabs.count - 1)
+            switchTab(to: openTabs[nextIdx].id)
+        }
+    }
+
+    /// Call before switching away from the active tab so in-progress
+    /// edits aren't lost — mirrors the web app's saveActiveTabContent.
+    public func saveActiveTabContent() {
+        guard let id = activeTabId, let idx = openTabs.firstIndex(where: { $0.id == id }) else { return }
+        openTabs[idx].content = sourceCode
+        openTabs[idx].isDirty = isDirty
+    }
+
     // Files synced to repo — paths that auto-push on every save
     @Published public var syncedFiles: Set<String> = []
     // Repo context for sync
@@ -88,19 +153,19 @@ public final class IDEState: ObservableObject {
     // MARK: - File operations
 
     public func loadExample(_ code: String, name: String) {
-        sourceCode = code; currentFile = name + ".ash"; isDirty = false; selectedTab = .editor
+        openTab(name: name + ".ash", content: code)
     }
 
     public func newFile() {
-        // Generate unique filename — check both in-memory list AND persisted keys
+        // Generate unique filename — check saved files AND currently
+        // open-but-unsaved tabs, so a fresh tab never collides with
+        // one already open (e.g. the very first untitled.ash).
         var n = 1; var fname = "untitled.ash"
-        while localFiles.contains(fname) {
+        while localFiles.contains(fname) || openTabs.contains(where: { $0.name == fname }) {
             fname = "untitled_\(n).ash"; n += 1
         }
         let initialContent = "// \(fname)\n// Ash Edge Language · LEATR v2\n{{env:MyProject}}\n[[script:new-script]]\n\n"
-        sourceCode  = initialContent
-        currentFile = fname
-        isDirty     = false
+        openTab(name: fname, content: initialContent)
         // Persist immediately — guaranteed unique name
         UserDefaults.standard.set(initialContent, forKey: "ide_local_\(fname)")
         localFiles.append(fname)
@@ -144,7 +209,7 @@ public final class IDEState: ObservableObject {
         let repo = currentRepo?.name ?? ""
         let owner = currentRepo.map { String($0.fullName.split(separator: "/").first ?? Substring(username)) } ?? username
         let content = (try? await IDEGitHubClient.shared.readFile(owner: owner, repo: repo, path: file.path)) ?? ""
-        sourceCode = content; currentFile = file.name; isDirty = false; selectedTab = .editor
+        openTab(name: file.name, content: content)
     }
 
     public func saveFile(message: String? = nil) async -> Bool {
@@ -208,8 +273,7 @@ public final class IDEState: ObservableObject {
 
     public func openLocalFile(_ name: String) {
         if let content = UserDefaults.standard.string(forKey: "ide_local_\(name)") {
-            sourceCode = content; currentFile = name; isDirty = false; selectedTab = .editor
-            Task { @MainActor in IDELanguageStore.shared.setEnvFromFilename(name) }
+            openTab(name: name, content: content)
         }
     }
 }
