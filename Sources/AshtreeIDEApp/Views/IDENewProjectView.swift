@@ -12,6 +12,8 @@ struct IDENewProjectSheet: View {
     @State private var selectedEnv: IDELanguageEnv = IDELanguageEnv.find(id: "ash")
     @State private var projectName = ""
     @State private var showDropdown = false
+    @State private var showImport = false
+    @State private var importError: String? = nil
     @FocusState private var nameFocused: Bool
 
     // Quick-access featured languages (big buttons at top)
@@ -37,6 +39,37 @@ struct IDENewProjectSheet: View {
                                 .font(.system(size:10,design:.monospaced))
                                 .foregroundColor(Color(hex:"#4a5568"))
                                 .fixedSize(horizontal:false,vertical:true)
+                        }
+
+                        // ── Import from device — no need to create a
+                        // project shell first, just pick a real file and
+                        // it loads straight into the editor. ──
+                        Button { showImport = true } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "square.and.arrow.down")
+                                    .font(.system(size: 15))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Import from Device")
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("Browse your files — .cpp, .py, .js, .ash, and more")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .opacity(0.7)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.system(size: 11))
+                            }
+                            .foregroundColor(Color(hex: "#00e5ff"))
+                            .padding(12)
+                            .background(Color(hex: "#00e5ff").opacity(0.08))
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: "#00e5ff").opacity(0.25), lineWidth: 0.5))
+                        }
+                        .buttonStyle(.plain)
+
+                        HStack(spacing: 10) {
+                            Rectangle().fill(Color(hex: "#21262d")).frame(height: 1)
+                            Text("OR START A NEW FILE").font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundColor(Color(hex: "#4a5568")).kerning(1)
+                            Rectangle().fill(Color(hex: "#21262d")).frame(height: 1)
                         }
 
                         // ── Featured language buttons ────────────────
@@ -160,6 +193,34 @@ struct IDENewProjectSheet: View {
                     Button("Cancel") { isPresented = false }
                         .foregroundColor(Color(hex:"#4a5568"))
                 }
+            }
+            .fileImporter(isPresented: $showImport,
+                          allowedContentTypes: [.item],
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let accessed = url.startAccessingSecurityScopedResource()
+                    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                    guard let data = try? Data(contentsOf: url),
+                          let text = String(data: data, encoding: .utf8) else {
+                        importError = "Could not read \"\(url.lastPathComponent)\" as text."
+                        return
+                    }
+                    langStore.setEnvFromFilename(url.lastPathComponent)
+                    ideVM.openTab(name: url.lastPathComponent, content: text)
+                    isPresented = false
+                case .failure(let error):
+                    importError = error.localizedDescription
+                }
+            }
+            .alert("Import", isPresented: Binding(
+                get: { importError != nil },
+                set: { if !$0 { importError = nil } }
+            )) {
+                Button("OK", role: .cancel) { importError = nil }
+            } message: {
+                Text(importError ?? "")
             }
         }
     }
