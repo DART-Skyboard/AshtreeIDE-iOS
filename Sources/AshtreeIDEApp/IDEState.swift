@@ -351,6 +351,7 @@ public enum IDEDefaults {
         ("3D Animation",  "cube",        ash3D, "ash"),
         ("Neural Scene",  "brain.head.profile", neuralScene, "ash"),
         ("Arc Edge Vector","waveform",          arcEdgeVector, "ash"),
+        ("Journal Listener (Ash 2.1)", "dot.radiowaves.left.and.right", journalListenerAsh, "ash"),
         ("Reckon Calculator (Ash)", "function", reckonCalculatorAsh, "ash"),
         ("Reckon Calculator (C++)", "chevron.left.forwardslash.chevron.right", reckonCalculatorConsoleCpp, "cpp"),
     ]
@@ -590,6 +591,22 @@ import (GLDrivers)
     // real Ash runtime's Research(expr) capability: set expr <formula> in
     // the terminal (or tap the real keypad in the Interface tab) then run
     // to genuinely evaluate it. Matches the web app's example exactly. ──
+    static let journalListenerAsh = """
+// Ash 2.1: listen for an event, read a Shell 64 fact, journal it.
+// Open a shell64.state.ash file and type: shell64 load  — then run this and type: emit shard
+import (NetDrivers)
+(JournalMirror):-: {
+  var (k) // Shell 64 key
+  var (type) // journal entry type
+  var (s) // working slot
+  irin ("Data: k=syntax/ash/ash-autumn-repo type=shard_reflection")
+  net.listen (EventNode) [net:event] { when (evt) = shard }
+  shell64.read (k) placeto (s)
+  journal.write (entry) with var (s) [net:contents] [frp:Maritime/Envelope/R]
+  irout ("Journaled: "placeto (s))
+}|';\'|
+"""
+
     static let reckonCalculatorAsh = """
 // RECKON CALCULATOR — a real, working calculator in Ash Edge Language
 // Build & Run, then in the Terminal:

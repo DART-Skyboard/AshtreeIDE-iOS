@@ -63,6 +63,8 @@ public final class LeatrEngine: ObservableObject {
     // ── Published state ─────────────────────────────────────────
     @Published public var compilerLines: [CompilerLine] = []
     @Published public var terminalLines: [TerminalLine] = []
+    public var shell64State: Shell64State? = nil
+    private var ashHandlers: [String: [() -> Void]] = [:]
     @Published public var isRunning = false
     @Published public var nodeCount = 0
     @Published public var shellType = "—"
@@ -498,6 +500,30 @@ public final class LeatrEngine: ObservableObject {
     public var runtime: AshRuntime?
     private var runtimeSource: String?
 
+    private func termLine(_ text: String, _ color: String, _ isSystem: Bool) {
+        terminalLines.append(TerminalLine(text: text, color: color, isSystem: isSystem))
+    }
+
+    private func runAshExtensions(_ source: String) {
+        ashHandlers = [:]
+        if shell64State == nil {
+            termLine("  (Shell 64 socket empty — open a shell64.state.ash file and type 'shell64 load')", "#4a8a7a", true)
+        }
+        let host = AshExecHost(
+            read: { [weak self] key in self?.shell64State?.read(key) },
+            journal: { [weak self] type, text in
+                self?.termLine("  [journal] \(type) · \(text) (IDE preview — the live journal is written by Autumn)", "#bf5fff", true)
+            },
+            listen: { [weak self] evt, fn in
+                guard let self = self else { return }
+                self.ashHandlers[evt, default: []].append(fn)
+                self.termLine("  [net] listening for '\(evt)' — type: emit \(evt)", "#39ff14", true)
+            },
+            log: { [weak self] line in self?.termLine("  → \(line)", "#ffffff", false) }
+        )
+        AshExecutor.run(source: source, host: host)
+    }
+
     public func handleTerminalCommand(_ cmd: String, source: String) {
         let c = cmd.trimmingCharacters(in: .whitespaces)
         let lc = c.lowercased()
@@ -515,11 +541,32 @@ public final class LeatrEngine: ObservableObject {
 
         if lc == "run" {
             compile(source: source)
-            if let rt = runtime {
+            if AshExecutor.hasExtensions(source) {
+                runAshExtensions(source)      // Ash 2.1 programs (net./shell64./journal.) run on the shared executor
+            } else if let rt = runtime {
                 for line in rt.run() {
                     terminalLines.append(TerminalLine(text: "  → \(line)", color: "#ffffff", isSystem: false))
                 }
             }
+        } else if lc == "shell64 load" {
+            if let st = Shell64State(text: source) {
+                shell64State = st
+                termLine("  Shell 64 socket loaded: \(st.records.count) records", "#8ab4cc", true)
+            } else {
+                termLine("  Open a shell64.state.ash file in the editor first.", "#ff9500", false)
+            }
+        } else if lc == "shell64 info" {
+            if let st = shell64State {
+                let c = st.counts()
+                termLine("  Shell 64: \(st.records.count) records · data \(c.data) · sequence \(c.sequence) · buildable \(c.buildable)", "#8ab4cc", true)
+            } else {
+                termLine("  Shell 64 socket empty — 'shell64 load' with a state file open.", "#ff9500", false)
+            }
+        } else if verb == "emit", parts.count >= 2 {
+            let evt = parts[1]
+            let hs = ashHandlers[evt] ?? []
+            if hs.isEmpty { termLine("  No listener for '\(evt)' — run a script with net.listen first.", "#ff9500", false) }
+            for h in hs { h() }
         } else if lc == "clear" {
             terminalLines = []; compilerLines = []
         } else if lc == "status" {
@@ -542,7 +589,7 @@ public final class LeatrEngine: ObservableObject {
             terminalLines.append(TerminalLine(text: "  LEATR v2 · Ash Edge Language · DART Meadow", color: "#8ab4cc", isSystem: true))
             terminalLines.append(TerminalLine(text: "  Compiler Standard: (xa²√xa)±1", color: "#8ab4cc", isSystem: true))
         } else if lc == "help" {
-            terminalLines.append(TerminalLine(text: "  Commands: run · set <var> <value> · status · info · clear · exit · help", color: "#8ab4cc", isSystem: true))
+            terminalLines.append(TerminalLine(text: "  Commands: run · set <var> <value> · status · info · shell64 load|info · emit <event> · clear · exit · help", color: "#8ab4cc", isSystem: true))
             if let rt = runtime, !rt.listVars().isEmpty {
                 terminalLines.append(TerminalLine(text: "  Declared variables: \(rt.listVars().joined(separator: ", "))", color: "#8ab4cc", isSystem: true))
             }
