@@ -110,9 +110,7 @@ struct IDEEditorActionBar: View {
                     } else {
                         // Route to real compiler (Judge0/Piston) or WebView (HTML/Python/JS)
                         Task { @MainActor in
-                            await IDECompilerService.shared.execute(
-                                code: ideVM.sourceCode,
-                                language: lang)
+                            await ideVM.runNonAsh(lang: lang)
                         }
                     }
                 }
@@ -700,7 +698,7 @@ struct IDETerminalView: View {
 
             // Input bar
             HStack(spacing: 0) {
-                Text("ash ▸")
+                Text(IDELanguageStore.shared.activeEnv.id == "ash" ? "ash ▸" : "\(IDELanguageStore.shared.activeEnv.id) ▸")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundColor(Color(hex: "#00ffcc"))
                     .padding(.leading, 12)
@@ -715,7 +713,7 @@ struct IDETerminalView: View {
                     .padding(.leading, 8)
                     .onSubmit {
                         let cmd = input; input = ""
-                        ideVM.compiler.handleTerminalCommand(cmd, source: ideVM.sourceCode)
+                        Task { @MainActor in await ideVM.terminalCommand(cmd) }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { focused = true }
                     }
                 // Inline Done button — visible when keyboard is up, doesn't need toolbar
@@ -734,7 +732,7 @@ struct IDETerminalView: View {
                 Button("⏎") {
                     let cmd = input
                     input = ""
-                    ideVM.compiler.handleTerminalCommand(cmd, source: ideVM.sourceCode)
+                    Task { @MainActor in await ideVM.terminalCommand(cmd) }
                     // Re-focus after submit so keyboard stays up and next command works
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         focused = true

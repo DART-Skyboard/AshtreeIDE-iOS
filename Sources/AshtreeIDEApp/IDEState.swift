@@ -150,6 +150,49 @@ public final class IDEState: ObservableObject {
 
     public func autoLoadDefs() async { await compiler.autoLoadDefs() }
 
+    // MARK: - Non-Ash languages: run + terminal mirroring
+
+    private func termLine(_ text: String, _ color: String) {
+        compiler.terminalLines.append(TerminalLine(text: text, color: color, isSystem: false))
+    }
+
+    /// Runs the current source with the real compiler service (Judge0/Piston/WebView) and mirrors the output into the Terminal.
+    public func runNonAsh(lang: String) async {
+        termLine("── run \(lang) ──", "#4a8a7a")
+        await IDECompilerService.shared.execute(code: sourceCode, language: lang)
+        guard let r = IDECompilerService.shared.result else { return }
+        if r.webHTML != nil { termLine("(rendered in the Output tab)", "#4a8a7a") }
+        if !r.compileError.isEmpty {
+            for l in r.compileError.split(separator: "\n", omittingEmptySubsequences: false) { termLine(String(l), "#ff6b6b") }
+        }
+        if !r.stdout.isEmpty {
+            for l in r.stdout.split(separator: "\n", omittingEmptySubsequences: true) { termLine(String(l), "#9cdcfe") }
+        }
+        if !r.stderr.isEmpty {
+            for l in r.stderr.split(separator: "\n", omittingEmptySubsequences: true) { termLine(String(l), "#ff6b6b") }
+        }
+        termLine("(exit \(r.exitCode))", "#4a8a7a")
+    }
+
+    /// Language-aware terminal: Ash commands go to the Ash engine; other languages get run/list/clear/help.
+    public func terminalCommand(_ cmd: String) async {
+        let lang = IDELanguageStore.shared.activeEnv.id
+        if lang == "ash" {
+            compiler.handleTerminalCommand(cmd, source: sourceCode)
+            return
+        }
+        let c = cmd.trimmingCharacters(in: .whitespaces).lowercased()
+        termLine("$ \(cmd)", "#4a8a7a")
+        switch c {
+        case "run": await runNonAsh(lang: lang)
+        case "list": for l in sourceCode.split(separator: "\n", omittingEmptySubsequences: false) { termLine(String(l), "#9cdcfe") }
+        case "clear": compiler.terminalLines = []
+        case "help": termLine("Commands for \(lang): run · list · clear · help", "#9cdcfe")
+        case "exit": termLine("(terminal stays open; switch the file language to use Ash commands)", "#4a8a7a")
+        default: termLine("Unknown command for \(lang). Type 'help'.", "#ff6b6b")
+        }
+    }
+
     // MARK: - File operations
 
     public func loadExample(_ code: String, name: String, lang: String = "ash") {

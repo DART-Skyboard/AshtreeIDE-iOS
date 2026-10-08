@@ -96,8 +96,7 @@ struct IDETopBar: View {
                     Task { await ideVM.buildAndRun() }
                 } else {
                     Task { @MainActor in
-                        await IDECompilerService.shared.execute(
-                            code: ideVM.sourceCode, language: runLang)
+                        await ideVM.runNonAsh(lang: runLang)
                     }
                 }
             } label: {
