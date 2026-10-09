@@ -562,6 +562,13 @@ public final class LeatrEngine: ObservableObject {
             } else {
                 termLine("  Shell 64 socket empty — 'shell64 load' with a state file open.", "#ff9500", false)
             }
+        } else if verb == "radian" {
+            // Tool Radian: radian encode <text> | decode <state> | analyze <text>  (runs on this device, nothing is sent)
+            let rest = String(cmd.trimmingCharacters(in: .whitespaces).dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            let first = (rest.split(separator: " ").first.map(String.init) ?? "").lowercased()
+            let isCmd = ["encode", "decode", "analyze", "analyse"].contains(first)
+            let reply = AshRadian.respond(isCmd ? rest : "analyze " + rest) ?? "Tool Radian: give me something to analyze."
+            for ln in reply.components(separatedBy: "\n") { termLine("  " + ln, "#8ab4cc", true) }
         } else if verb == "emit", parts.count >= 2 {
             let evt = parts[1]
             let hs = ashHandlers[evt] ?? []
@@ -589,7 +596,7 @@ public final class LeatrEngine: ObservableObject {
             terminalLines.append(TerminalLine(text: "  LEATR v2 · Ash Edge Language · DART Meadow", color: "#8ab4cc", isSystem: true))
             terminalLines.append(TerminalLine(text: "  Compiler Standard: (xa²√xa)±1", color: "#8ab4cc", isSystem: true))
         } else if lc == "help" {
-            terminalLines.append(TerminalLine(text: "  Commands: run · set <var> <value> · status · info · shell64 load|info · emit <event> · clear · exit · help", color: "#8ab4cc", isSystem: true))
+            terminalLines.append(TerminalLine(text: "  Commands: run · set <var> <value> · status · info · shell64 load|info · radian encode|decode|analyze <…> · emit <event> · clear · exit · help", color: "#8ab4cc", isSystem: true))
             if let rt = runtime, !rt.listVars().isEmpty {
                 terminalLines.append(TerminalLine(text: "  Declared variables: \(rt.listVars().joined(separator: ", "))", color: "#8ab4cc", isSystem: true))
             }
