@@ -564,10 +564,19 @@ public final class LeatrEngine: ObservableObject {
             }
         } else if verb == "radian" {
             // Tool Radian: radian encode <text> | decode <state> | analyze <text>  (runs on this device, nothing is sent)
-            let rest = String(cmd.trimmingCharacters(in: .whitespaces).dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            var rest = String(cmd.trimmingCharacters(in: .whitespaces).dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            // optional context for the 63 checks: `emotion=worried shell=MAR` (neutral / absent = baseline)
+            var rctx = AshRadian.Context()
+            let kept = rest.split(separator: " ").filter { tok in
+                let t = tok.lowercased()
+                if t.hasPrefix("emotion=") { rctx.emotion = String(t.dropFirst(8)); return false }
+                if t.hasPrefix("shell=") { rctx.shell = String(tok.dropFirst(6)).uppercased(); return false }
+                return true
+            }
+            rest = kept.joined(separator: " ")
             let first = (rest.split(separator: " ").first.map(String.init) ?? "").lowercased()
             let isCmd = ["encode", "decode", "analyze", "analyse"].contains(first)
-            let reply = AshRadian.respond(isCmd ? rest : "analyze " + rest) ?? "Tool Radian: give me something to analyze."
+            let reply = AshRadian.respond(isCmd ? rest : "analyze " + rest, ctx: rctx) ?? "Tool Radian: give me something to analyze."
             for ln in reply.components(separatedBy: "\n") { termLine("  " + ln, "#8ab4cc", true) }
         } else if verb == "emit", parts.count >= 2 {
             let evt = parts[1]
